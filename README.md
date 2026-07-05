@@ -9,6 +9,11 @@ The vendor RKLLM stack already runs multi-matmul LLMs on RK3576 — on the vendo
 `librkllmrt`) on a **mainline** kernel, using mainline's own clock / power-domain
 / IOMMU drivers instead of the BSP's.
 
+> **Companion project:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
+> is the other half of the same effort — the from-scratch *open* RK3576 NPU
+> driver (rocket / mesa). Two routes to the same goal: this repo puts the vendor
+> stack on a mainline kernel; that one builds an open driver from scratch.
+
 ## Status — honest
 
 This is **bring-up in progress**, not a finished product.
@@ -30,11 +35,14 @@ What does **not** work yet:
   units never engage: `raw status 0x30000000`, the `0x300` DPU-done bits are
   never set, `task_counter` stays `0`, on both cores, with no IOMMU page fault.
   No tokens come out yet. This is the same class of "the PC won't iterate the
-  task / the units won't engage" wall seen in the from-scratch open driver
-  investigation, now hit through the vendor stack on a mainline port. Under
-  active investigation — the divergence is somewhere in the mainline port
+  task / the units won't engage" wall seen in the
+  [companion open-driver work](https://github.com/gahingwoo/linux-rk3576-npu),
+  now hit through the vendor stack on a mainline port. Under
+  active investigation — the divergence is likely somewhere in the mainline port
   (IOMMU delivery / on-chip NBUF operand cache / a platform mode bit), since the
-  same vendor payload is known to compute on the vendor and rocket kernels.
+  same vendor stack runs these `w4a16` matmul LLMs on the vendor 6.1 BSP kernel.
+  (The open rocket driver only ever computed a standalone conv on mainline, not
+  this matmul, so it is not itself evidence that the payload is sound here.)
 
 If you are looking for a working RK3576 LLM setup today, use the vendor 6.1 BSP.
 This repo is about getting there on mainline.
