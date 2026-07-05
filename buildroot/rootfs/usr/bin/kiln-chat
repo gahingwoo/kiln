@@ -1,0 +1,26 @@
+#!/bin/sh
+# Kiln: chat with the baked TinyLlama-1.1B on the RK3576 NPU (librkllmrt v1.2.0).
+export LD_LIBRARY_PATH=/usr/lib
+MODEL=/opt/models/TinyLlama-1.1B-Chat-v1.0-rk3576-w4a16.rkllm
+
+# ensure the vendor rknpu driver is loaded and the DRM render node is up
+if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
+	echo "kiln-chat: loading rknpu ..."
+	modprobe rknpu 2>/dev/null
+	sleep 1
+fi
+if ! ls /dev/dri/renderD* >/dev/null 2>&1; then
+	echo "kiln-chat: NPU render node not found. Check: dmesg | grep -i rknpu"
+	exit 1
+fi
+if [ ! -f "$MODEL" ]; then
+	echo "kiln-chat: model not found at $MODEL"
+	exit 1
+fi
+
+echo "=== Kiln RK3576 NPU LLM (TinyLlama-1.1B w4a16, librkllmrt v1.2.0) ==="
+echo "Loading the model onto the NPU (takes a few seconds) ..."
+echo "Then type your question at 'user:'. Type 'exit' or press Ctrl-C to quit."
+echo
+# args: model_path max_new_tokens max_context_len
+exec rkllm_demo "$MODEL" 512 2048

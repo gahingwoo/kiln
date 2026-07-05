@@ -1,0 +1,36 @@
+# --- Build output -----------------------------------------------------------
+/br-out/
+/br-dl/
+*.log
+
+# --- Fetched at build time (GPL source pulled, not redistributed here) -------
+/driver/rknpu/
+
+# --- Closed / third-party runtimes and blobs (fetched, not redistributed) ----
+/buildroot/dl/
+
+# --- Model weights (large, licensed separately) ------------------------------
+/model/
+*.rkllm
+
+# --- Kernel out-of-tree module build artifacts -------------------------------
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.order
+Module.symvers
+modules.order
+.*.cmd
+.tmp_versions/
+.module-common.o
+
+# --- Local bring-up logs / scratch -------------------------------------------
+/dirty/
+
+# --- Work-in-progress notes (drafts; will be organised before publishing) ----
+/docs/
+
+# --- OS junk -----------------------------------------------------------------
+.DS_Store

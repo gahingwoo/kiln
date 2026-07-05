@@ -1,0 +1,21 @@
+# Kiln kernel config fragment (RK3576 NPU, vendor rknpu on mainline).
+# Applied on top of the rocket tree's kernel/base.config (which already sets
+# DRM=y, DRM_ACCEL=y, ARM_SCMI_PROTOCOL=y, COMMON_CLK_SCMI=y, ROCKCHIP_IOMMU=y,
+# DMABUF_HEAPS=y, IOMMU_DMA=y, ROCKCHIP_PM_DOMAINS=y, PM_DEVFREQ=y, CMA=y,
+# DMA_CMA=y -- all verified in that file).
+#
+# The ONE change vs the rocket fragment: turn ROCKET OFF so it does not bind the
+# NPU. Kiln drives the NPU with the out-of-tree vendor rknpu.ko instead.
+# CONFIG_DRM_ACCEL_ROCKET is not set
+
+# rknpu.ko is out-of-tree (built in post-build.sh); the kernel only needs the
+# platform stack below (already =y in base.config, restated for clarity).
+CONFIG_DRM=y
+CONFIG_DRM_ACCEL=y
+CONFIG_ROCKCHIP_IOMMU=y
+CONFIG_ARM_SCMI_PROTOCOL=y
+CONFIG_COMMON_CLK_SCMI=y
+CONFIG_DMABUF_HEAPS=y
+CONFIG_ROCKCHIP_PM_DOMAINS=y
+# ext4 metadata_csum needs crc32c or the rootfs mount panics (rocket-tree note).
+CONFIG_CRYPTO_CRC32C=y
