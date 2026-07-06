@@ -30,6 +30,10 @@ Verified end-to-end on a hand-built `linux-next` 7.1 image:
   `w4a16` and answers coherently at **~9 tok/s decode, ~0.3 s time-to-first-token**
   (the chat prints a `[bench]` line per turn).
 
+**Full serial log** — boot → `rknpu 0.9.8` loads → all four MMU banks enabled →
+MobileNetV2 vision (~161 fps) and Qwen2.5-1.5B chat (9.3 tok/s), both on the NPU:
+[**gist**](https://gist.github.com/gahingwoo/545f90ed2b0e7542e2953e089c60ee01).
+
 The core porting problem — and why a naive port only produces `task_counter=0`
 timeouts — is that the NPU is **one device with two IOMMUs**, but mainline
 `rockchip-iommu` manages only a single primary iommu, leaving the second core's
