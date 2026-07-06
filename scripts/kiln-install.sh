@@ -136,8 +136,10 @@ on_patched_kernel(){ [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/nul
 if ! on_patched_kernel; then
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
 	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+	# exclude the -dbg debug-symbol image (bindeb-pkg builds it; ~hundreds of MB,
+	# not needed, and its name also matches linux-image-*.deb below).
 	( cd "$TMP" && curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" \
-		| grep -o 'https://[^"]*\.deb' | xargs -n1 -r curl -fLO ) \
+		| grep -o 'https://[^"]*\.deb' | grep -v -- '-dbg' | xargs -n1 -r curl -fLO ) \
 		|| die "could not download the mainline kernel .debs from the '$KTAG' release."
 	IMG="$(ls "$TMP"/linux-image-*.deb 2>/dev/null | head -1)"
 	[ -f "$IMG" ] || die "no linux-image .deb in the '$KTAG' release (is the CI build published?)."
