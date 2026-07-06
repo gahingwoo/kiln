@@ -71,8 +71,11 @@ fi
 [ -f "$DL/libgomp.so.1" ]  && sudo install -m0644 "$DL/libgomp.so.1"  /usr/lib/
 sudo install -m0755 "$HERE/buildroot/rootfs/usr/bin/kiln-chat" /usr/bin/ 2>/dev/null || true
 
-# demo: build against the fetched rkllm.h; static libstdc++ so it runs regardless
-# of the target's libstdc++ version.
+# --- 5. RKNN (vision) runtime + demo ----------------------------------------
+[ -f "$DL/librknnrt.so" ] && sudo install -m0644 "$DL/librknnrt.so" /usr/lib/
+sudo install -m0755 "$HERE/buildroot/rootfs/usr/bin/kiln-vision" /usr/bin/ 2>/dev/null || true
+
+# demos: static libstdc++ so they run regardless of the target's libstdc++ version.
 if [ -f "$DL/rkllm.h" ]; then
 	say "building rkllm_demo"
 	g++ -include cstdint "$HERE/buildroot/board/rock4d/rkllm_chat.cpp" \
@@ -80,11 +83,24 @@ if [ -f "$DL/rkllm.h" ]; then
 	    -Wl,-rpath-link,"$DL" -lrkllmrt -lpthread -o /tmp/rkllm_demo \
 	  && sudo install -m0755 /tmp/rkllm_demo /usr/bin/rkllm_demo
 fi
+if [ -f "$DL/rknn_api.h" ]; then
+	say "building rknn_mobilenet"
+	g++ "$HERE/buildroot/board/rock4d/rknn_mobilenet.cpp" \
+	    -I "$DL" -L "$DL" -static-libstdc++ -static-libgcc \
+	    -Wl,-rpath-link,"$DL" -lrknnrt -lpthread -lm -o /tmp/rknn_mobilenet \
+	  && sudo install -m0755 /tmp/rknn_mobilenet /usr/bin/rknn_mobilenet
+fi
 
+# --- 6. models + vision assets ----------------------------------------------
 sudo mkdir -p /opt/models
-say "put your <name>-rk3576-w4a16.rkllm into /opt/models/ and point kiln-chat's MODEL= at it"
+[ -f "$HERE/model/test.jpg" ]            && sudo install -m0644 "$HERE/model/test.jpg"            /opt/models/
+[ -f "$HERE/model/imagenet_labels.txt" ] && sudo install -m0644 "$HERE/model/imagenet_labels.txt" /opt/models/
+[ -f "$HERE/model/mobilenetv2-12_rk3576.rknn" ] && sudo install -m0644 "$HERE/model/mobilenetv2-12_rk3576.rknn" /opt/models/
+say "put your <name>-rk3576-w4a16.rkllm (LLM) into /opt/models/ and set MODEL= in /usr/bin/kiln-chat"
 sudo depmod -a "$KREL" || true
 
 echo
-say "done. Reboot, then run: kiln-chat"
-say "verify the NPU came up:  dmesg | grep -i rknpu   (expect 'RKNPU ... kiln mmu enable_all')"
+say "done. Reboot, then:"
+say "  kiln-chat                          # chat with the LLM on the NPU"
+say "  kiln-vision /opt/models/test.jpg   # classify an image on the NPU"
+say "verify the NPU came up:  dmesg | grep -i rknpu   (expect 'RKNPU ... kiln mmu enable_all: ... st=0x19/0x19/0x19/0x19')"
