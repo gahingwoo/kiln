@@ -4,48 +4,48 @@ Run LLMs on the **Rockchip RK3576 NPU** under a **mainline** Linux kernel (7.x),
 by building the vendor GPL `rknpu` driver **out-of-tree** and driving it with the
 closed `librkllmrt` RKLLM runtime.
 
-The vendor RKLLM stack already runs multi-matmul LLMs on RK3576 — on the vendor
-6.1 BSP kernel. Kiln's goal is to put that same stack (vendor `rknpu.ko` v0.9.8 +
-`librkllmrt`) on a **mainline** kernel, using mainline's own clock / power-domain
-/ IOMMU drivers instead of the BSP's.
+The vendor RKLLM stack runs multi-matmul LLMs on RK3576 — but on the vendor 6.1
+BSP kernel. Kiln puts that same stack (vendor `rknpu.ko` v0.9.8 + `librkllmrt`)
+on a **mainline** kernel, using mainline's own clock / power-domain / IOMMU
+drivers instead of the BSP's.
 
 > **Companion project:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
 > is the other half of the same effort — the from-scratch *open* RK3576 NPU
 > driver (rocket / mesa). Two routes to the same goal: this repo puts the vendor
 > stack on a mainline kernel; that one builds an open driver from scratch.
 
-## Status — honest
+## Status
 
-This is **bring-up in progress**, not a finished product.
+**It works.** On real hardware (ROCK 4D, RK3576) on a mainline kernel, the vendor
+RKLLM stack runs LLM inference on the NPU and generates tokens.
 
-What works on real hardware (ROCK 4D, RK3576), verified from serial logs:
+Verified end-to-end on a hand-built `linux-next` 7.1 image:
 
-- The out-of-tree `rknpu` v0.9.8 driver builds against mainline 7.1 (`linux-next`)
-  and loads (a set of small API-compat shims cover the 6.1 → 7.x drift; see
-  `driver/apply-mainline-shims.sh`).
-- It probes cleanly against a mainline DT node (`dts/`): power domains toggle,
-  the register interface and MMU respond, the DRM render node comes up.
-- `librkllmrt` opens the device, loads a TinyLlama-1.1B `w4a16` `.rkllm` model,
-  and the **runtime/driver/platform version-lock check passes on the board**
-  (`rkllm 1.2.0` + `rknpu 0.9.8` + `RK3576`).
+- The out-of-tree `rknpu` v0.9.8 driver builds against mainline 7.x and loads.
+  One patch covers both the 6.1 → 7.x API drift and the RK3576 NPU-execution
+  fixes (`driver/patches/README.md`).
+- Probes cleanly against a mainline DT node; the runtime/driver/platform
+  version-lock passes on the board (`rkllm 1.2.0` + `rknpu 0.9.8` + `RK3576`).
+- **Matmul executes and tokens generate.** `librkllmrt` runs Qwen2.5-1.5B
+  `w4a16` and answers coherently at **~9 tok/s decode, ~0.3 s time-to-first-token**
+  (the chat prints a `[bench]` line per turn).
 
-What does **not** work yet:
+The core porting problem — and why a naive port only produces `task_counter=0`
+timeouts — is that the NPU is **one device with two IOMMUs**, but mainline
+`rockchip-iommu` manages only a single primary iommu, leaving the second core's
+MMU disabled: its jobs read the regcmd IOVA as a raw physical address → garbage →
+no execution. Kiln enables all four MMU banks from the driver and flushes their
+TLB per job. Full write-up in [`driver/patches/README.md`](driver/patches/README.md).
 
-- **NPU compute jobs time out.** The matmul job is submitted, but the compute
-  units never engage: `raw status 0x30000000`, the `0x300` DPU-done bits are
-  never set, `task_counter` stays `0`, on both cores, with no IOMMU page fault.
-  No tokens come out yet. This is the same class of "the PC won't iterate the
-  task / the units won't engage" wall seen in the
-  [companion open-driver work](https://github.com/gahingwoo/linux-rk3576-npu),
-  now hit through the vendor stack on a mainline port. Under
-  active investigation — the divergence is likely somewhere in the mainline port
-  (IOMMU delivery / on-chip NBUF operand cache / a platform mode bit), since the
-  same vendor stack runs these `w4a16` matmul LLMs on the vendor 6.1 BSP kernel.
-  (The open rocket driver only ever computed a standalone conv on mainline, not
-  this matmul, so it is not itself evidence that the payload is sound here.)
+Bring-up caveats (honest):
 
-If you are looking for a working RK3576 LLM setup today, use the vendor 6.1 BSP.
-This repo is about getting there on mainline.
+- After a long idle the NPU power-domain drops; the first inference on the next
+  cold power-on can degrade until it re-warms (mitigated by a 10-min keep-warm).
+- The orphan MMU's TLB is flushed per-job rather than tracked by the iommu core —
+  fine for inference, not a general-purpose iommu fix.
+- The **Armbian** path (DKMS + DT overlay, see [`ARMBIAN.md`](ARMBIAN.md)) is
+  portable by construction (no kernel patches — all fixes are in the module + a
+  DT overlay) but not yet tested on an Armbian release.
 
 ## Build
 
@@ -65,21 +65,26 @@ buildroot/build-image.sh
 The module alone can be built against any mainline kernel tree:
 
 ```sh
-make KDIR=/path/to/your/kernel/build     # after fetch + shims
+make KDIR=/path/to/your/kernel/build     # after fetch + apply-shims
 ```
+
+**On Armbian** (stock mainline kernel, no kernel rebuild): `./scripts/install-armbian.sh`
+does DKMS + the DT overlay + runtime. See [`ARMBIAN.md`](ARMBIAN.md).
 
 The DT node uses the **real** vendor RK3576 addresses (see `dts/`), not the
 guessed open-driver layout.
 
 ## Layout
 
-- `dts/` — RK3576 NPU DT node + ROCK 4D board DTS (real vendor addresses)
+- `dts/` — RK3576 NPU board DTS + `*-kiln-npu.dtso` device-tree overlay (Armbian)
 - `driver/fetch-vendor-driver.sh` — pull the GPL v0.9.8 `rknpu` source
-- `driver/apply-mainline-shims.sh` — the 6.1 → 7.x API-compat shims (idempotent)
+- `driver/apply-mainline-shims.sh` — apply `patches/kiln-mainline.patch` (idempotent)
+- `driver/patches/` — the one mainline + NPU-execution patch, with a rationale README
 - `driver/compat/` — build-time compat stub headers for BSP-only `soc/rockchip/*`
-- `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM path)
-- `buildroot/` — br2-external: board config, package, rootfs overlay, image scripts
-- `scripts/` — build / load / smoke-test / run helpers
+- `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM path; DKMS)
+- `buildroot/` — br2-external: board config, image scripts, tracked `rkllm_chat.cpp`
+- `scripts/` — build / load / run helpers + `install-armbian.sh`
+- `ARMBIAN.md` — running Kiln on a stock Armbian kernel
 
 ## Credits
 

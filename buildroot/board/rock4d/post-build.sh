@@ -43,25 +43,37 @@ install -D -m0755 "$KILN/buildroot/dl/libgomp.so.1" "$TARGET_DIR/usr/lib/libgomp
 echo "[kiln] installed librkllmrt.so + librknnrt.so + libgomp.so.1 -> /usr/lib/"
 
 # --- 2b. cross-compile the turnkey rkllm_demo (v1.2.0 C API) -----------------
-# -include cstdint: the v1.2.0 rkllm.h omits it and modern g++ needs it.
-# -rpath-link dl: lets ld resolve librkllmrt.so's libgomp.so.1 dependency at link.
-GXX="${CROSS}g++"
-if [ -f "$KILN/buildroot/dl/llm_demo.cpp" ] && [ -x "$GXX" ]; then
-	"$GXX" -include cstdint "$KILN/buildroot/dl/llm_demo.cpp" \
-		-I"$KILN/buildroot/dl" -L"$KILN/buildroot/dl" \
-		-Wl,-rpath-link,"$KILN/buildroot/dl" -lrkllmrt -lpthread \
-		-o "$TARGET_DIR/usr/bin/rkllm_demo"
-	echo "[kiln] built + installed /usr/bin/rkllm_demo (v1.2.0 C API)"
+# Source is tracked at board/rock4d/rkllm_chat.cpp (Qwen ChatML prompt + identity,
+# per-turn benchmark, tokenizer-exception-safe, no example menu). rkllm.h is
+# fetched into dl/. -include cstdint: v1.2.0 rkllm.h omits it and modern g++ needs
+# it. -rpath-link dl: lets ld resolve librkllmrt.so's libgomp.so.1 at link.
+SRC="$KILN/buildroot/board/rock4d/rkllm_chat.cpp"
+DL="$KILN/buildroot/dl"
+OUT="$TARGET_DIR/usr/bin/rkllm_demo"
+build_demo() {  # $1 = compiler, $2 = extra flags
+	"$1" -include cstdint "$SRC" -I"$DL" -L"$DL" \
+		-Wl,-rpath-link,"$DL" $2 -lrkllmrt -lpthread -o "$OUT"
+}
+if [ ! -f "$SRC" ]; then
+	echo "[kiln] WARN: rkllm_chat.cpp missing; skipping demo build"
+elif [ -x "${CROSS}g++" ] && build_demo "${CROSS}g++" "" 2>/dev/null; then
+	echo "[kiln] built + installed /usr/bin/rkllm_demo (buildroot toolchain)"
+elif command -v aarch64-linux-gnu-g++ >/dev/null 2>&1 \
+     && build_demo aarch64-linux-gnu-g++ "-static-libstdc++ -static-libgcc"; then
+	# Fallback for when the buildroot toolchain's dev objects (crt*.o) aren't
+	# present: use a host aarch64 cross g++. -static-libstdc++ avoids depending on
+	# a newer GLIBCXX (gcc 13) than the target's gcc-12 libstdc++ provides.
+	echo "[kiln] built + installed /usr/bin/rkllm_demo (host g++ + static libstdc++)"
 else
-	echo "[kiln] WARN: rkllm_demo source or g++ missing; skipping demo build"
+	echo "[kiln] WARN: rkllm_demo build failed / no usable compiler; skipping"
 fi
 
 # --- 3. model (default: NOT baked in; scp after boot) -----------------------
 mkdir -p "$TARGET_DIR/opt/models"
 if [ "${KILN_BAKE_MODEL:-0}" = "1" ]; then
-	M="$KILN/model/TinyLlama-1.1B-Chat-v1.0-rk3576-w4a16.rkllm"
+	M="$KILN/model/Qwen2.5-1.5B-rk3576-w4a16.rkllm"
 	[ -f "$M" ] && install -D -m0644 "$M" "$TARGET_DIR/opt/models/$(basename "$M")" \
-		&& echo "[kiln] baked model into /opt/models/ (image will be ~700 MB larger)"
+		&& echo "[kiln] baked model into /opt/models/ (image will be ~1.4 GB larger)"
 else
 	echo "[kiln] model NOT baked in; scp it to /opt/models on the board (docs/BRINGUP.md 5)"
 fi

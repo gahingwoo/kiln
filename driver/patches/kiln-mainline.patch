@@ -1,0 +1,522 @@
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/include/rknpu_devfreq.h rknpu/include/rknpu_devfreq.h
+--- rknpu/include/rknpu_devfreq.h	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/include/rknpu_devfreq.h	2026-07-05 22:16:42.018007032 +1200
+@@ -7,7 +7,7 @@
+ #ifndef __LINUX_RKNPU_DEVFREQ_H
+ #define __LINUX_RKNPU_DEVFREQ_H
+ 
+-#ifdef CONFIG_PM_DEVFREQ
++#if 0 /* Kiln: DVFS off for bring-up; use no-op fallbacks below */
+ void rknpu_devfreq_lock(struct rknpu_device *rknpu_dev);
+ void rknpu_devfreq_unlock(struct rknpu_device *rknpu_dev);
+ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev);
+@@ -34,12 +34,12 @@
+ 
+ static inline int rknpu_devfreq_runtime_suspend(struct device *dev)
+ {
+-	return -EOPNOTSUPP;
++	return 0;
+ }
+ 
+ static inline int rknpu_devfreq_runtime_resume(struct device *dev)
+ {
+-	return -EOPNOTSUPP;
++	return 0;
+ }
+ #endif /* CONFIG_PM_DEVFREQ */
+ 
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/include/rknpu_drv.h rknpu/include/rknpu_drv.h
+--- rknpu/include/rknpu_drv.h	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/include/rknpu_drv.h	2026-07-06 13:17:39.607000336 +1200
+@@ -151,6 +151,23 @@
+ 	struct device *genpd_dev_npu0;
+ 	struct device *genpd_dev_npu1;
+ 	struct device *genpd_dev_npu2;
++	/*
++	 * KILN: the platform rockchip-iommu devices behind "iommus" (rknpu_mmu_0/1).
++	 * The NPU power-domain cycle wipes the MMU (DTE=0, paging off) and the
++	 * dev->iommu device-link resume does not re-enable it in this multi-domain
++	 * genpd setup, so rknpu force-resumes these per power-on (-> rk_iommu_resume
++	 * -> rk_iommu_enable reprograms the freshly powered MMU). Observed on board:
++	 * mmu status=0x18 (paging bit0=0), dte=0 at job time -> matmul task_counter=0.
++	 */
++	struct device *iommu_dev[2];
++	/*
++	 * KILN: mainline rockchip-iommu manages only ONE of the NPU's two IOMMUs
++	 * (dev_iommu_priv_get returns a single primary), so the orphan MMU is never
++	 * enabled and its core's jobs fault silently. rknpu mirrors the primary's
++	 * page-directory base (learned from the enabled bank, cached here) onto ALL
++	 * four MMU banks in rknpu_mmu_enable_all(). 0 until learned.
++	 */
++	u32 mmu_dte;
+ 	bool multiple_domains;
+ 	atomic_t power_refcount;
+ 	atomic_t cmdline_power_refcount;
+@@ -185,5 +202,7 @@
+ int rknpu_power_get(struct rknpu_device *rknpu_dev);
+ int rknpu_power_put(struct rknpu_device *rknpu_dev);
+ int rknpu_power_put_delay(struct rknpu_device *rknpu_dev);
++/* KILN: (re)enable all four NPU MMU banks; call after power-on and soft-reset. */
++void rknpu_mmu_enable_all(struct rknpu_device *rknpu_dev);
+ 
+ #endif /* __LINUX_RKNPU_DRV_H_ */
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/include/rknpu_iommu.h rknpu/include/rknpu_iommu.h
+--- rknpu/include/rknpu_iommu.h	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/include/rknpu_iommu.h	2026-07-05 22:42:29.919532353 +1200
+@@ -25,7 +25,9 @@
+ };
+ 
+ struct rknpu_iommu_dma_cookie {
++#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+ 	enum iommu_dma_cookie_type type;
++#endif
+ 
+ 	/* Full allocator for IOMMU_DMA_IOVA_COOKIE */
+ 	struct iova_domain iovad;
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_debugger.c rknpu/rknpu_debugger.c
+--- rknpu/rknpu_debugger.c	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/rknpu_debugger.c	2026-07-05 20:33:20.645561116 +1200
+@@ -14,7 +14,7 @@
+ #include <asm/div64.h>
+ 
+ #ifndef FPGA_PLATFORM
+-#ifdef CONFIG_PM_DEVFREQ
++#if 0 /* Kiln: DVFS off for bring-up */
+ #include <../drivers/devfreq/governor.h>
+ #endif
+ #endif
+@@ -193,7 +193,7 @@
+ 	return 0;
+ }
+ 
+-#ifdef CONFIG_PM_DEVFREQ
++#if 0 /* Kiln: DVFS off for bring-up */
+ static ssize_t rknpu_freq_set(struct file *file, const char __user *ubuf,
+ 			      size_t len, loff_t *offp)
+ {
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_drv.c rknpu/rknpu_drv.c
+--- rknpu/rknpu_drv.c	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/rknpu_drv.c	2026-07-06 14:30:06.606002409 +1200
+@@ -759,7 +759,8 @@
+ 	.gem_prime_import = drm_gem_prime_import,
+ #endif
+ 	.gem_prime_import_sg_table = rknpu_gem_prime_import_sg_table,
+-#if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
++#if KERNEL_VERSION(6, 6, 0) <= LINUX_VERSION_CODE
++#elif KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+ 	.gem_prime_mmap = drm_gem_prime_mmap,
+ #else
+ 	.gem_prime_mmap = rknpu_gem_prime_mmap,
+@@ -769,7 +770,6 @@
+ 	.fops = &rknpu_drm_driver_fops,
+ 	.name = DRIVER_NAME,
+ 	.desc = DRIVER_DESC,
+-	.date = DRIVER_DATE,
+ 	.major = DRIVER_MAJOR,
+ 	.minor = DRIVER_MINOR,
+ 	.patchlevel = DRIVER_PATCHLEVEL,
+@@ -814,8 +814,13 @@
+ static void rknpu_init_timer(struct rknpu_device *rknpu_dev)
+ {
+ 	rknpu_dev->kt = ktime_set(0, RKNPU_LOAD_INTERVAL);
++#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
++	hrtimer_setup(&rknpu_dev->timer, hrtimer_handler, CLOCK_MONOTONIC,
++		      HRTIMER_MODE_REL);
++#else
+ 	hrtimer_init(&rknpu_dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+ 	rknpu_dev->timer.function = hrtimer_handler;
++#endif
+ 	hrtimer_start(&rknpu_dev->timer, rknpu_dev->kt, HRTIMER_MODE_REL);
+ }
+ 
+@@ -934,6 +939,77 @@
+ }
+ #endif
+ 
++/*
++ * KILN: enable ALL four NPU MMU banks (both cores).
++ *
++ * The vendor NPU is one platform device with two IOMMUs (rknpu_mmu_0/1), but
++ * mainline rockchip-iommu only manages a single primary iommu per device
++ * (dev_iommu_priv_get), so only one core's MMU (2 banks) is ever attached +
++ * enabled. The orphan core's MMU stays disabled (paging off, DTE=0): its jobs
++ * read the regcmd IOVA as a raw physical address -> garbage -> task_counter=0,
++ * no page fault. And rknpu_soft_reset() (issued on every job timeout) resets
++ * the cores incl. both MMUs, which the iommu driver never re-enables.
++ *
++ * Fix: learn the domain's page-directory base from whichever bank the kernel
++ * enabled (cached in mmu_dte), then mirror it onto every disabled bank with the
++ * minimal rk_iommu enable sequence (write DTE, ZAP, unmask IRQ, ENABLE_PAGING).
++ * Banks are at NPU_base[core] + 0x2000 / +0x2100; register offsets match
++ * drivers/iommu/rockchip-iommu.c (DTE=0x00, STATUS=0x04, COMMAND=0x08,
++ * INT_MASK=0x1c; CMD ZAP=4, ENABLE_PAGING=0; STATUS bit0 = paging enabled).
++ * Must be called with both NPU power domains on (i.e. after power/clocks up).
++ */
++void rknpu_mmu_enable_all(struct rknpu_device *rknpu_dev)
++{
++	void __iomem *banks[4];
++	u32 dte = rknpu_dev->mmu_dte;
++	int b;
++
++	if (!rknpu_dev->iommu_en || !rknpu_dev->base[0] || !rknpu_dev->base[1])
++		return;
++
++	banks[0] = rknpu_dev->base[0] + 0x2000;
++	banks[1] = rknpu_dev->base[0] + 0x2100;
++	banks[2] = rknpu_dev->base[1] + 0x2000;
++	banks[3] = rknpu_dev->base[1] + 0x2100;
++
++	/* Learn the page-directory base from any bank the kernel already enabled. */
++	if (!dte) {
++		for (b = 0; b < 4; b++) {
++			u32 v = readl(banks[b] + 0x00);
++
++			if (v) {
++				dte = v;
++				break;
++			}
++		}
++		rknpu_dev->mmu_dte = dte;
++	}
++	if (!dte)
++		return;
++
++	for (b = 0; b < 4; b++) {
++		u32 st = readl(banks[b] + 0x04);
++		int i;
++
++		if (st & 0x1)			/* paging already enabled */
++			continue;
++		writel(dte, banks[b] + 0x00);	/* DTE_ADDR */
++		writel(4, banks[b] + 0x08);	/* CMD ZAP_CACHE */
++		writel(0x03, banks[b] + 0x1c);	/* INT_MASK: page-fault + bus-error */
++		writel(0, banks[b] + 0x08);	/* CMD ENABLE_PAGING */
++		for (i = 0; i < 100; i++) {
++			if (readl(banks[b] + 0x04) & 0x1)
++				break;
++			udelay(10);
++		}
++	}
++
++	LOG_DEV_INFO(rknpu_dev->dev,
++		     "kiln mmu enable_all: dte=%#x st=%#x/%#x/%#x/%#x\n", dte,
++		     readl(banks[0] + 0x04), readl(banks[1] + 0x04),
++		     readl(banks[2] + 0x04), readl(banks[3] + 0x04));
++}
++
+ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
+ {
+ 	struct device *dev = rknpu_dev->dev;
+@@ -971,6 +1047,21 @@
+ 	}
+ 
+ #ifndef FPGA_PLATFORM
++	/*
++	 * KILN: with devfreq off, nothing sets the NPU compute clock, so
++	 * CLK_RKNN_DSU0 (clks[0]) sits at the low CRU power-on default and a large
++	 * matmul cannot finish within the 6s job timeout (task_counter stays 0).
++	 * Pin a clean GPLL-derived rate (594 MHz = 1188/2) on every power-up and log
++	 * the resulting rates for bring-up.
++	 */
++	clk_set_rate(rknpu_dev->clks[0].clk, 594000000);
++	LOG_DEV_INFO(dev, "kiln clk: dsu0=%lu aclk0=%lu aclk1=%lu\n",
++		     clk_get_rate(rknpu_dev->clks[0].clk),
++		     clk_get_rate(rknpu_dev->clks[1].clk),
++		     clk_get_rate(rknpu_dev->clks[2].clk));
++#endif
++
++#ifndef FPGA_PLATFORM
+ 	rknpu_devfreq_lock(rknpu_dev);
+ #endif
+ 
+@@ -1028,6 +1119,28 @@
+ 			      ret);
+ 	}
+ 
++	/*
++	 * KILN: the NPU power-domain cycle above wiped the platform IOMMU (DTE=0,
++	 * paging off) and the dev->iommu device-link resume does not re-enable it
++	 * here. Force-resume the MMU devices so rk_iommu_resume() -> rk_iommu_enable()
++	 * reprograms the freshly powered MMU (DTE + paging) before the first job.
++	 * Hold the ref across the job; released in rknpu_power_off().
++	 */
++	{
++		int di;
++
++		/*
++		 * Resume the primary IOMMU so the kernel enables it (rk_iommu_resume ->
++		 * rk_iommu_enable) and rknpu_mmu_enable_all() can learn the page-dir
++		 * base from it, then mirror it onto the orphan MMU's banks.
++		 */
++		for (di = 0; di < 2; di++)
++			if (rknpu_dev->iommu_dev[di])
++				pm_runtime_get_sync(rknpu_dev->iommu_dev[di]);
++
++		rknpu_mmu_enable_all(rknpu_dev);
++	}
++
+ 	if (rknpu_dev->config->state_init != NULL)
+ 		rknpu_dev->config->state_init(rknpu_dev);
+ 
+@@ -1050,6 +1163,19 @@
+ 	rknpu_devfreq_lock(rknpu_dev);
+ #endif
+ 
++	/*
++	 * KILN: release the MMU refs taken in rknpu_power_on() while the NPU is
++	 * still powered, so rk_iommu_suspend() (disable) runs on a live MMU before
++	 * the power domains below are cut.
++	 */
++	{
++		int di;
++
++		for (di = 0; di < 2; di++)
++			if (rknpu_dev->iommu_dev[di])
++				pm_runtime_put_sync(rknpu_dev->iommu_dev[di]);
++	}
++
+ 	pm_runtime_put_sync(dev);
+ 
+ 	if (rknpu_dev->multiple_domains) {
+@@ -1471,6 +1597,28 @@
+ 
+ 	platform_set_drvdata(pdev, rknpu_dev);
+ 
++	/*
++	 * KILN: resolve the platform IOMMU devices (rknpu_mmu_0/1) from the "iommus"
++	 * phandles so rknpu_power_on() can force-resume them after each NPU
++	 * power-domain cycle (which wipes the MMU's DTE + paging). See iommu_dev[]
++	 * in struct rknpu_device.
++	 */
++	{
++		int di;
++
++		for (di = 0; di < 2; di++) {
++			struct device_node *inp =
++				of_parse_phandle(dev->of_node, "iommus", di);
++			struct platform_device *ipdev = NULL;
++
++			if (inp) {
++				ipdev = of_find_device_by_node(inp);
++				of_node_put(inp);
++			}
++			rknpu_dev->iommu_dev[di] = ipdev ? &ipdev->dev : NULL;
++		}
++	}
++
+ 	pm_runtime_enable(dev);
+ 
+ 	if (of_count_phandle_with_args(dev->of_node, "power-domains",
+@@ -1498,7 +1646,16 @@
+ #endif
+ 
+ 	// set default power put delay to 3s
+-	rknpu_dev->power_put_delay = 3000;
++	/*
++	 * KILN: keep the NPU powered between ops. A power-domain cycle drops the NPU
++	 * to a cold state whose first post-resume inference degrades (repetition /
++	 * garbage) -- the per-power-session cold-start seen in the rocket work. 60s
++	 * covers one generation but a user pausing to read/type between turns still
++	 * idles it out and the next turn comes up cold. 10 min keeps it warm across
++	 * realistic chat pacing so no turn runs cold; it still powers down when the
++	 * board is genuinely idle.
++	 */
++	rknpu_dev->power_put_delay = 600000;
+ 	rknpu_dev->power_off_wq =
+ 		create_freezable_workqueue("rknpu_power_off_wq");
+ 	if (!rknpu_dev->power_off_wq) {
+@@ -1560,7 +1717,11 @@
+ 	return ret;
+ }
+ 
++#if KERNEL_VERSION(6, 11, 0) <= LINUX_VERSION_CODE
++static void rknpu_remove(struct platform_device *pdev)
++#else
+ static int rknpu_remove(struct platform_device *pdev)
++#endif
+ {
+ 	struct rknpu_device *rknpu_dev = platform_get_drvdata(pdev);
+ 	int i = 0;
+@@ -1621,7 +1782,9 @@
+ 
+ 	pm_runtime_disable(&pdev->dev);
+ 
++#if KERNEL_VERSION(6, 11, 0) > LINUX_VERSION_CODE
+ 	return 0;
++#endif
+ }
+ 
+ #ifndef FPGA_PLATFORM
+@@ -1694,5 +1857,5 @@
+ MODULE_VERSION(RKNPU_GET_DRV_VERSION_STRING(DRIVER_MAJOR, DRIVER_MINOR,
+ 					    DRIVER_PATCHLEVEL));
+ #if KERNEL_VERSION(5, 16, 0) < LINUX_VERSION_CODE
+-MODULE_IMPORT_NS(DMA_BUF);
++MODULE_IMPORT_NS("DMA_BUF");
+ #endif
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_gem.c rknpu/rknpu_gem.c
+--- rknpu/rknpu_gem.c	2026-07-06 15:02:06.572818325 +1200
++++ rknpu/rknpu_gem.c	2026-07-05 20:33:20.640791033 +1200
+@@ -14,9 +14,9 @@
+ #include <linux/shmem_fs.h>
+ #include <linux/dma-buf.h>
+ #include <linux/iommu.h>
+-#include <linux/pfn_t.h>
++#include <linux/pfn.h>
++#include <linux/vmalloc.h>
+ #include <linux/version.h>
+-#include <linux/version_compat_defs.h>
+ #include <asm/cacheflush.h>
+ 
+ #if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
+@@ -28,6 +28,12 @@
+ #include "rknpu_gem.h"
+ #include "rknpu_iommu.h"
+ 
++#if KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE
++/* iommu_map() gained a trailing gfp_t arg in 6.3; vendor uses the 5-arg form.
++ * Defined after <linux/iommu.h> so the real 6-arg prototype is already seen. */
++#define iommu_map(d, i, p, s, prot) iommu_map((d), (i), (p), (s), (prot), GFP_KERNEL)
++#endif
++
+ #define RKNPU_GEM_ALLOC_FROM_PAGES 1
+ 
+ #if RKNPU_GEM_ALLOC_FROM_PAGES
+@@ -1269,8 +1275,12 @@
+ 	}
+ 
+ 	pfn = page_to_pfn(rknpu_obj->pages[page_offset]);
++#if KERNEL_VERSION(6, 16, 0) <= LINUX_VERSION_CODE
++	return vmf_insert_mixed(vma, vmf->address, pfn);
++#else
+ 	return vmf_insert_mixed(vma, vmf->address,
+ 				__pfn_to_pfn_t(pfn, PFN_DEV));
++#endif
+ }
+ #elif KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
+ int rknpu_gem_fault(struct vm_fault *vmf)
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_iommu.c rknpu/rknpu_iommu.c
+--- rknpu/rknpu_iommu.c	2026-07-06 15:02:06.573003325 +1200
++++ rknpu/rknpu_iommu.c	2026-07-05 20:33:20.643735158 +1200
+@@ -10,6 +10,11 @@
+ 
+ #include "rknpu_iommu.h"
+ 
++#if KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE
++/* iommu_map_sg() gained a trailing gfp_t arg in 6.3; vendor uses the 5-arg form. */
++#define iommu_map_sg(d, i, sg, n, prot) iommu_map_sg((d), (i), (sg), (n), (prot), GFP_KERNEL)
++#endif
++
+ #define RKNPU_SWITCH_DOMAIN_WAIT_TIME_MS 6000
+ 
+ dma_addr_t rknpu_iommu_dma_alloc_iova(struct iommu_domain *domain, size_t size,
+@@ -123,7 +128,7 @@
+ 		sg_dma_len(s) = 0;
+ 
+ #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+-		if (sg_is_dma_bus_address(s)) {
++		if (sg_dma_is_bus_address(s)) {
+ 			if (i > 0)
+ 				cur = sg_next(cur);
+ 
+@@ -181,7 +186,7 @@
+ 
+ #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
+ 	for_each_sg(sg, s, nents, i) {
+-		if (sg_is_dma_bus_address(s)) {
++		if (sg_dma_is_bus_address(s)) {
+ 			sg_dma_unmark_bus_address(s);
+ 		} else {
+ 			if (sg_dma_address(s) != DMA_MAPPING_ERROR)
+@@ -318,7 +323,7 @@
+ 	 * just have to be determined.
+ 	 */
+ 	for_each_sg(sg, tmp, nents, i) {
+-		if (sg_is_dma_bus_address(tmp)) {
++		if (sg_dma_is_bus_address(tmp)) {
+ 			sg_dma_unmark_bus_address(tmp);
+ 			continue;
+ 		}
+@@ -332,7 +337,7 @@
+ 
+ 	nents -= i;
+ 	for_each_sg(tmp, tmp, nents, i) {
+-		if (sg_is_dma_bus_address(tmp)) {
++		if (sg_dma_is_bus_address(tmp)) {
+ 			sg_dma_unmark_bus_address(tmp);
+ 			continue;
+ 		}
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_job.c rknpu/rknpu_job.c
+--- rknpu/rknpu_job.c	2026-07-06 15:02:06.573003325 +1200
++++ rknpu/rknpu_job.c	2026-07-06 14:12:59.855001920 +1200
+@@ -368,6 +368,21 @@
+ 	job->last_task = last_task;
+ 	job->int_mask[core_index] = last_task->int_mask;
+ 
++	/*
++	 * KILN: flush this core's MMU TLB before every job. Mainline rockchip-iommu
++	 * only invalidates the PRIMARY iommu on unmap; the orphan MMU (see
++	 * rknpu_mmu_enable_all) never gets zapped, so its TLB accumulates stale
++	 * IOVA->PA entries as librkllmrt churns BOs across a session -> the core
++	 * reads wrong/freed pages -> output degrades into repetition/garbage and
++	 * eventually a userspace segfault. ZAP_CACHE (cmd 4) on both banks
++	 * (core_base + 0x2000/0x2100, COMMAND at +0x08) forces a fresh page-table
++	 * walk. Safe here: the core is idle during commit.
++	 */
++	if (rknpu_dev->iommu_en) {
++		REG_WRITE(4, 0x2008);
++		REG_WRITE(4, 0x2108);
++	}
++
+ 	REG_WRITE(0x1, RKNPU_OFFSET_PC_OP_EN);
+ 	REG_WRITE(0x0, RKNPU_OFFSET_PC_OP_EN);
+ 
+@@ -599,6 +614,30 @@
+ 					 rknpu_dev->config->pc_task_number_mask),
+ 					ktime_us_delta(ktime_get(),
+ 						       job->timestamp));
++				/*
++				 * KILN diag: the units never engage (task_counter
++				 * stays 0, DPU-done 0x300 never set, no page fault).
++				 * Dump the state that discriminates the cause:
++				 *  - MMU: STATUS bit0 = paging enabled, DTE = page-dir
++				 *    base, INT_RAWSTAT/PAGE_FAULT_ADDR = silent fault?
++				 *    (paging-off or DTE=0 => PC reads garbage regcmd
++				 *    with NO fault -> no engage: our leading theory).
++				 *  - PC: DATA_ADDR/DMA_BASE readback = the regcmd+task
++				 *    IOVAs the PC was pointed at (sane high IOVAs?).
++				 *  - S_POINTER of cna/core/dpu/dpu_rdma: bit16 SET =
++				 *    executer engaged (rocket's engage indicator).
++				 */
++				LOG_ERROR(
++					"\tkiln mmu: status=%#x dte=%#x int_rawstat=%#x pgflt_addr=%#x | pc: data_addr=%#x dma_base=%#x task_ctrl=%#x\n",
++					REG_READ(0x2004), REG_READ(0x2000),
++					REG_READ(0x2014), REG_READ(0x200c),
++					REG_READ(RKNPU_OFFSET_PC_DATA_ADDR),
++					REG_READ(RKNPU_OFFSET_PC_DMA_BASE_ADDR),
++					REG_READ(RKNPU_OFFSET_PC_TASK_CONTROL));
++				LOG_ERROR(
++					"\tkiln engage: cna_sp=%#x core_sp=%#x dpu_sp=%#x rdma_sp=%#x (bit16=engaged)\n",
++					REG_READ(0x1004), REG_READ(0x3004),
++					REG_READ(0x4004), REG_READ(0x5004));
+ 			}
+ 		}
+ 		rknpu_soft_reset(rknpu_dev);
+diff -ruN '--exclude=*.o' '--exclude=*.cmd' '--exclude=*.ko' '--exclude=*.mod*' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=.tmp*' rknpu/rknpu_reset.c rknpu/rknpu_reset.c
+--- rknpu/rknpu_reset.c	2026-07-06 15:02:06.573003325 +1200
++++ rknpu/rknpu_reset.c	2026-07-06 13:17:52.652000343 +1200
+@@ -151,6 +151,14 @@
+ 	if (rknpu_dev->config->state_init != NULL)
+ 		rknpu_dev->config->state_init(rknpu_dev);
+ 
++	/*
++	 * KILN: the soft reset above (and the detach/reattach) leaves the two NPU
++	 * MMUs disabled -- and mainline rockchip-iommu only re-enables the primary,
++	 * never the orphan. Re-enable all four banks from the cached page-dir base
++	 * so the next job's MMU is live instead of cascading more timeouts.
++	 */
++	rknpu_mmu_enable_all(rknpu_dev);
++
+ 	mutex_unlock(&rknpu_dev->reset_lock);
+ #endif
+ 

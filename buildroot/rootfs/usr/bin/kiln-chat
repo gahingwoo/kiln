@@ -1,12 +1,17 @@
 #!/bin/sh
-# Kiln: chat with the baked TinyLlama-1.1B on the RK3576 NPU (librkllmrt v1.2.0).
+# Kiln: chat with the baked Qwen2.5-1.5B on the RK3576 NPU (librkllmrt v1.2.0).
 export LD_LIBRARY_PATH=/usr/lib
-MODEL=/opt/models/TinyLlama-1.1B-Chat-v1.0-rk3576-w4a16.rkllm
+MODEL=/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
 
 # ensure the vendor rknpu driver is loaded and the DRM render node is up
 if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
+	KO="/lib/modules/$(uname -r)/extra/rknpu.ko"
 	echo "kiln-chat: loading rknpu ..."
-	modprobe rknpu 2>/dev/null
+	# self-check: print the vermagic of the module actually on THIS card vs what
+	# the running kernel wants. If they differ, this card is a stale flash (the
+	# built image ships a matching module) -- reflash the current sdcard.img.
+	echo "kiln-chat: on-card $(grep -a -o 'vermagic=[^ ]*' "$KO" 2>/dev/null | head -1); kernel=$(uname -r)"
+	modprobe rknpu 2>/dev/null || insmod "$KO" 2>/dev/null
 	sleep 1
 fi
 if ! ls /dev/dri/renderD* >/dev/null 2>&1; then
@@ -18,7 +23,7 @@ if [ ! -f "$MODEL" ]; then
 	exit 1
 fi
 
-echo "=== Kiln RK3576 NPU LLM (TinyLlama-1.1B w4a16, librkllmrt v1.2.0) ==="
+echo "=== Kiln RK3576 NPU LLM (Qwen2.5-1.5B w4a16, librkllmrt v1.2.0) ==="
 echo "Loading the model onto the NPU (takes a few seconds) ..."
 echo "Then type your question at 'user:'. Type 'exit' or press Ctrl-C to quit."
 echo
