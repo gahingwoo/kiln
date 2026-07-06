@@ -1,0 +1,104 @@
+name: armbian-npu-kernel
+
+# Build a PATCHED Armbian edge kernel for the Radxa ROCK 4D (RK3576) carrying the
+# RK3576 NPU pm-domain fix (kernel-patches/0001-...), so the vendor rknpu NPU
+# actually powers on instead of SError-freezing. Kernel-only build: no loop
+# devices / privileged Docker needed, so it runs cleanly on a stock GH runner.
+#
+# Trigger: Actions tab -> "armbian-npu-kernel" -> Run workflow.
+# Output:  the linux-image / linux-dtb / linux-headers .deb as a run Artifact,
+#          and (default) attached to the "armbian-npu-kernel-<branch>" release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Armbian kernel branch (edge=7.1, current=6.18, bleedingedge=7.2)"
+        default: edge
+      kver:
+        description: "rockchip64 kernel patch dir version (edge->7.1)"
+        default: "7.1"
+      patches:
+        description: "Kiln kernel patches to apply (space-separated prefixes)"
+        default: "0001"
+      publish:
+        description: "Attach the .deb to a GitHub release"
+        type: boolean
+        default: true
+  push:
+    paths:
+      - kernel-patches/**
+      - .github/workflows/armbian-npu-kernel.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: armbian-npu-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout Kiln
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Clone Armbian build framework
+        run: git clone --depth 1 https://github.com/armbian/build.git "$HOME/armbian"
+
+      - name: Stage Kiln kernel patches into userpatches
+        run: |
+          KVER="${{ github.event.inputs.kver || '7.1' }}"
+          PDIR="$HOME/armbian/userpatches/kernel/archive/rockchip64-$KVER"
+          mkdir -p "$PDIR"
+          for n in ${{ github.event.inputs.patches || '0001' }}; do
+            cp kernel-patches/${n}-*.patch "$PDIR"/
+          done
+          echo "staged patches:"; ls -l "$PDIR"
+
+      - name: Build the patched kernel
+        run: |
+          cd "$HOME/armbian"
+          ./compile.sh kernel \
+            BOARD=radxa-rock-4d \
+            BRANCH="${{ github.event.inputs.branch || 'edge' }}" \
+            KERNEL_CONFIGURE=no \
+            NO_APT_CACHER=yes \
+            SHARE_LOG=no
+
+      - name: Collect .deb packages
+        id: collect
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/debs"
+          cp "$HOME"/armbian/output/debs/linux-image-*.deb   "$GITHUB_WORKSPACE/debs/" || true
+          cp "$HOME"/armbian/output/debs/linux-dtb-*.deb     "$GITHUB_WORKSPACE/debs/" || true
+          cp "$HOME"/armbian/output/debs/linux-headers-*.deb "$GITHUB_WORKSPACE/debs/" || true
+          echo "--- collected ---"; ls -l "$GITHUB_WORKSPACE/debs"
+          test -n "$(ls -A "$GITHUB_WORKSPACE"/debs 2>/dev/null)" || { echo "no .deb produced"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiln-armbian-npu-kernel-${{ github.event.inputs.branch || 'edge' }}
+          path: debs/*.deb
+          if-no-files-found: error
+
+      - name: Publish to a release
+        if: ${{ github.event.inputs.publish != 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="armbian-npu-kernel-${{ github.event.inputs.branch || 'edge' }}"
+          NOTES="Patched Armbian ${{ github.event.inputs.branch || 'edge' }} kernel for Radxa ROCK 4D (RK3576) with the Kiln NPU pm-domain fix (kernel-patches/0001). Install on the board: sudo dpkg -i linux-image-*.deb linux-dtb-*.deb linux-headers-*.deb; then re-enable the NPU overlay + module and reboot (see ARMBIAN-KERNEL.md)."
+          gh release view "$TAG" >/dev/null 2>&1 \
+            && gh release upload "$TAG" debs/*.deb --clobber \
+            || gh release create "$TAG" debs/*.deb --title "Kiln NPU kernel ($TAG)" --notes "$NOTES"
