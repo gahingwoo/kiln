@@ -2,7 +2,7 @@ name: mainline-npu-kernel
 
 # Build a PURE mainline linux-7.1.3 kernel for the Radxa ROCK 4D (RK3576) with
 # Kiln's NPU patches (kernel-patches 0001 + 0003 + 0004) -- no Armbian kernel
-# patches. Cross-compiled on a stock GH runner; published as bindeb-pkg .debs.
+# patches. Built natively on a free arm64 GH runner; published as bindeb-pkg .debs.
 #
 # Trigger: Actions tab -> "mainline-npu-kernel" -> Run workflow.
 
@@ -34,7 +34,9 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # native arm64 runner (free for public repos): build native, so no
+    # cross-toolchain and no cross-arch build-dep hell for dpkg-buildpackage.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
       - name: Checkout Kiln
@@ -47,11 +49,11 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      - name: Install build deps (aarch64 cross toolchain)
+      - name: Install build deps (native arm64)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
-            gcc-aarch64-linux-gnu build-essential dpkg-dev rsync kmod cpio xz-utils
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev libdw-dev \
+            build-essential dpkg-dev debhelper rsync kmod cpio xz-utils
 
       - name: Fetch mainline linux-${{ env.KVER }}
         run: |
@@ -78,17 +80,17 @@ jobs:
             cfg="$(find /tmp/aimg -name 'config-*' | head -1)"
             [ -n "$cfg" ] && cp "$cfg" .config && echo "base config: $(basename "$cfg")"
           fi
-          [ -f .config ] || make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          [ -f .config ] || make ARCH=arm64 defconfig
           # vendor rknpu (out-of-tree) is used, not the open rocket driver
           ./scripts/config --disable DRM_ACCEL_ROCKET
           # keep the pieces the NPU stack needs on
           ./scripts/config --enable ROCKCHIP_IOMMU --enable ARM_ROCKCHIP_CPUFREQ || true
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          make ARCH=arm64 olddefconfig
 
       - name: Build (bindeb-pkg)
         run: |
           cd "$KDIR"
-          make -j"$(nproc)" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          make -j"$(nproc)" ARCH=arm64 \
             KDEB_PKGVERSION="$(date -u +%Y%m%d)" bindeb-pkg
 
       - name: Collect .deb packages
