@@ -1,0 +1,86 @@
+From 0ba2bddf42946c497c0d37a0955483d287c84f5c Mon Sep 17 00:00:00 2001
+From: gahingwoo <huhuvmb88@outlook.com>
+Date: Wed, 10 Jun 2026 10:53:24 +1200
+Subject: [PATCH] pmdomain/rockchip: cycle optional power-domain resets on
+ power-on
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Some power domains contain hardware bus interfaces that require an
+explicit assert/deassert edge on their reset line after the domain
+is powered on.  The CRU preserves reset state across power cycles
+(stays deasserted), so the hardware never sees the edge it needs to
+initialize unless the driver pulses it explicitly.
+
+Add an optional resets property to rockchip_pm_domain.  When present,
+the resets are asserted and deasserted (with a 10 µs hold) inside
+rockchip_pd_power() after the idle bits are cleared and the
+delay_us settling time has elapsed, but before any device in the
+domain resumes.  This ordering guarantees the bus is fully
+initialized before any device driver accesses registers.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@gmail.com>
+---
+ drivers/pmdomain/rockchip/pm-domains.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/pmdomain/rockchip/pm-domains.c b/drivers/pmdomain/rockchip/pm-domains.c
+index 1787f62ba..7a88a9149 100644
+--- a/drivers/pmdomain/rockchip/pm-domains.c
++++ b/drivers/pmdomain/rockchip/pm-domains.c
+@@ -18,6 +18,7 @@
+ #include <linux/of_address.h>
+ #include <linux/of_clk.h>
+ #include <linux/clk.h>
++#include <linux/reset.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/mfd/syscon.h>
+@@ -102,6 +103,7 @@ struct rockchip_pm_domain {
+ 	struct clk_bulk_data *clks;
+ 	struct device_node *node;
+ 	struct regulator *supply;
++	struct reset_control *resets;
+ };
+ 
+ struct rockchip_pmu {
+@@ -671,6 +673,12 @@ static int rockchip_pd_power(struct rockchip_pm_domain *pd, bool power_on)
+ 		if (pd->info->delay_us)
+ 			udelay(pd->info->delay_us);
+ 
++		if (pd->resets) {
++			reset_control_assert(pd->resets);
++			udelay(10);
++			reset_control_deassert(pd->resets);
++		}
++
+ 		rockchip_pmu_restore_qos(pd);
+ 	}
+ 
+@@ -840,6 +848,14 @@ static int rockchip_pm_add_one_domain(struct rockchip_pmu *pmu,
+ 	if (error)
+ 		goto err_put_clocks;
+ 
++	pd->resets = of_reset_control_array_get_optional_exclusive(node);
++	if (IS_ERR(pd->resets)) {
++		error = PTR_ERR(pd->resets);
++		dev_err(pmu->dev, "%pOFn: failed to get resets: %d\n", node, error);
++		pd->resets = NULL;
++		goto err_unprepare_clocks;
++	}
++
+ 	pd->num_qos = of_count_phandle_with_args(node, "pm_qos",
+ 						 NULL);
+ 
+@@ -910,6 +926,7 @@ static int rockchip_pm_add_one_domain(struct rockchip_pmu *pmu,
+ 	clk_bulk_unprepare(pd->num_clks, pd->clks);
+ err_put_clocks:
+ 	clk_bulk_put(pd->num_clks, pd->clks);
++	reset_control_put(pd->resets);
+ 	return error;
+ }
+ 
+-- 
+2.43.0
+
