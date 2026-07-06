@@ -27,23 +27,43 @@ grep -aqi rk3576 /proc/device-tree/compatible 2>/dev/null \
 [ -f /boot/armbianEnv.txt ] || die "no /boot/armbianEnv.txt — this installer targets Armbian"
 
 # --- 1. prerequisites (incl. the Armbian header package for THIS kernel) -----
-BRANCH="$(printf '%s' "$KREL" | sed -E 's/^[0-9.]+-//')"     # e.g. 6.19.5-edge-rockchip64 -> edge-rockchip64
-say "installing prerequisites (kernel headers: linux-headers-$BRANCH) ..."
+BRANCH="$(printf '%s' "$KREL" | sed -E 's/^[0-9.]+-//')"     # 6.19.5-edge-rockchip64 -> edge-rockchip64
+say "installing build prerequisites ..."
 $SUDO apt-get update -qq || true
-$SUDO apt-get install -y git build-essential dkms device-tree-compiler "linux-headers-$BRANCH" \
-	|| die "apt failed. If linux-headers-$BRANCH is missing, install kernel headers via 'armbian-config' (System -> Install headers) and re-run."
+$SUDO apt-get install -y git build-essential dkms device-tree-compiler \
+	|| die "apt failed installing build prerequisites."
+
+# Kernel headers MATCHING THE RUNNING kernel. Try the exact-version package first,
+# then the branch meta. We never touch your kernel without asking: the meta tracks
+# the LATEST edge build, which may be newer than the one you booted.
 if [ ! -d "/lib/modules/$KREL/build" ]; then
-	# The linux-headers-$BRANCH meta tracks the LATEST edge kernel, which is often
-	# newer than the one currently booted (a stale, un-upgraded kernel). Detect it.
-	HDR="$(ls -d /usr/src/linux-headers-*-"$BRANCH" 2>/dev/null | head -1)"
-	HVER="${HDR:+$(basename "$HDR" | sed 's/^linux-headers-//')}"
-	if [ -n "$HVER" ] && [ "$HVER" != "$KREL" ]; then
-		say "headers are for $HVER but you are running $KREL — your Armbian kernel is stale."
-		say "upgrading the kernel to $HVER to match (linux-image/linux-dtb-$BRANCH) ..."
-		$SUDO apt-get install -y "linux-image-$BRANCH" "linux-dtb-$BRANCH" || true
-		die "kernel upgraded to $HVER. REBOOT into it (sudo reboot), then re-run this installer."
+	say "getting kernel headers for $KREL ..."
+	$SUDO apt-get install -y "linux-headers-$KREL"    >/dev/null 2>&1 || \
+	$SUDO apt-get install -y "linux-headers-$BRANCH"  >/dev/null 2>&1 || true
+fi
+if [ ! -d "/lib/modules/$KREL/build" ]; then
+	HVER="$(ls -d /usr/src/linux-headers-*-"$BRANCH" 2>/dev/null | sort -V | tail -1 | sed 's|.*/linux-headers-||')"
+	say "No headers for your running kernel ($KREL)."
+	[ -n "$HVER" ] && say "Armbian's '$BRANCH' branch has moved on to $HVER and no longer ships headers for older builds."
+	CHOICE="${KILN_KERNEL:-}"
+	if [ -z "$CHOICE" ] && [ -e /dev/tty ]; then
+		printf '\nChoose (default keeps your kernel):\n  [k] KEEP %s -- stop here; you install its matching headers, then re-run\n  [u] UPGRADE the kernel to %s and reboot (edge; may be less stable)\nk/u? ' \
+			"$KREL" "${HVER:-the latest edge}" >/dev/tty
+		read -r CHOICE </dev/tty || CHOICE=k
 	fi
-	die "kernel headers for $KREL not found (/lib/modules/$KREL/build). Install linux-headers-$BRANCH."
+	case "${CHOICE:-k}" in
+	u|U|upgrade)
+		say "upgrading kernel to ${HVER:-latest} (linux-image/linux-dtb/linux-headers-$BRANCH) ..."
+		$SUDO apt-get install -y "linux-image-$BRANCH" "linux-dtb-$BRANCH" "linux-headers-$BRANCH" || true
+		die "Kernel upgraded. Reboot (sudo reboot) into it, then re-run this installer." ;;
+	*)
+		die "Keeping $KREL. Kiln builds fine on 6.x (its shims cover 6.1->7.x) -- the only
+ blocker is the missing headers for THIS kernel. Get them by one of:
+   - dpkg -i a linux-headers-$KREL .deb saved from when this kernel was current; or
+   - enable the Armbian archive apt repo, then: sudo apt install linux-headers-$KREL; or
+   - re-run non-interactively to upgrade instead:  KILN_KERNEL=u curl -fsSL <url> | bash
+ Then re-run this installer." ;;
+	esac
 fi
 
 # --- 2. fetch Kiln ----------------------------------------------------------
