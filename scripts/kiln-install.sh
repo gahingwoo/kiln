@@ -107,8 +107,8 @@ fi
 
 # --- 5. runtimes + demos (native aarch64 build) + vision assets --------------
 say "fetching runtimes and building the demos ..."
-buildroot/fetch-runtimes.sh
-buildroot/fetch-vision-assets.sh || true
+bash buildroot/fetch-runtimes.sh
+bash buildroot/fetch-vision-assets.sh || true
 DL="$KILN_DIR/buildroot/dl"
 for so in librkllmrt.so librknnrt.so libgomp.so.1; do
 	[ -f "$DL/$so" ] && $SUDO install -m0644 "$DL/$so" /usr/lib/ || true
