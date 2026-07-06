@@ -92,6 +92,10 @@ $SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
 $SUDO dkms add "/usr/src/$PKG-$VER"
 $SUDO dkms build "$PKG/$VER"
 $SUDO dkms install "$PKG/$VER"
+# Load rknpu at boot. Loading a module needs root, so the demos shouldn't have to
+# each run; the overlay's NPU node is up before userspace, so a boot-time modprobe
+# binds it and the DRM render node is ready. (depmod already ran via dkms install.)
+echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
 
 # --- 4. NPU device-tree overlay (self-contained; symbols resolved at boot) ---
 say "installing the NPU overlay -> /boot/overlay-user/kiln-npu.dtbo ..."

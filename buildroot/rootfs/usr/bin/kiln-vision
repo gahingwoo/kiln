@@ -7,15 +7,18 @@ MODEL="${KILN_RKNN_MODEL:-/opt/models/mobilenetv2-12_rk3576.rknn}"
 LABELS="${KILN_RKNN_LABELS:-/opt/models/imagenet_labels.txt}"
 IMG="${1:-/opt/models/test.jpg}"
 
-# ensure the vendor rknpu driver is loaded (same as kiln-chat)
+# ensure the vendor rknpu driver is loaded (same as kiln-chat; normally
+# auto-loaded at boot via /etc/modules-load.d/rknpu.conf).
 if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
-	KO="/lib/modules/$(uname -r)/extra/rknpu.ko"
-	echo "kiln-vision: loading rknpu ..."
-	modprobe rknpu 2>/dev/null || insmod "$KO" 2>/dev/null
+	KO="$(find "/lib/modules/$(uname -r)" -name 'rknpu.ko*' 2>/dev/null | head -1)"
+	[ "$(id -u)" -eq 0 ] && S= || S=sudo   # loading a module needs root
+	echo "kiln-vision: loading rknpu (needs root) ..."
+	$S modprobe rknpu 2>/dev/null || $S insmod "$KO" 2>/dev/null
 	sleep 1
 fi
-if ! ls /dev/dri/renderD* >/dev/null 2>&1; then
-	echo "kiln-vision: NPU render node not found. Check: dmesg | grep -i rknpu"
+if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
+	echo "kiln-vision: rknpu not loaded. Load it as root first:  sudo modprobe rknpu"
+	echo "             (then: sudo dmesg | grep -i rknpu). It normally auto-loads at boot."
 	exit 1
 fi
 [ -f "$MODEL" ] || { echo "kiln-vision: model not found at $MODEL (a *-rk3576.rknn MobileNet)"; exit 1; }
