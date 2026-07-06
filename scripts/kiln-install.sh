@@ -42,8 +42,11 @@ if [ ! -d "/lib/modules/$KREL/build" ]; then
 	# not by kernel version. The header package at the SAME version as your
 	# installed kernel image is the header set for your running kernel -- so pin to
 	# it and we get matching headers without upgrading the kernel.
+	# --allow-downgrades: the headers meta may already be at the LATEST version
+	# (if a previous run pulled it); pinning back to the kernel's version is a
+	# downgrade of that package, which apt refuses without this flag.
 	IMGVER="$(dpkg-query -W -f='${Version}' "linux-image-$BRANCH" 2>/dev/null || true)"
-	[ -n "$IMGVER" ] && $SUDO apt-get install -y "linux-headers-$BRANCH=$IMGVER" >/dev/null 2>&1 || true
+	[ -n "$IMGVER" ] && $SUDO apt-get install -y --allow-downgrades "linux-headers-$BRANCH=$IMGVER" >/dev/null 2>&1 || true
 	[ -d "/lib/modules/$KREL/build" ] || $SUDO apt-get install -y "linux-headers-$KREL" >/dev/null 2>&1 || true
 fi
 if [ ! -d "/lib/modules/$KREL/build" ]; then
