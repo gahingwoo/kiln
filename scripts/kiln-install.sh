@@ -55,7 +55,10 @@ if ! on_patched_kernel; then
 		|| die "could not download the patched kernel .debs from the '$KTAG' release."
 	IMG="$(ls "$TMP"/linux-image-*.deb 2>/dev/null | head -1)"
 	[ -f "$IMG" ] || die "no linux-image .deb in the '$KTAG' release (is the CI build published?)."
-	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | head -1 | cut -d/ -f3)"
+	# NB: no 'head' in this pipe -- it would close the pipe early and SIGPIPE the
+	# dpkg-deb tar listing, which under 'set -o pipefail' aborts the script. sort -u
+	# consumes all input and a linux-image has exactly one /lib/modules/<release>.
+	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | sort -u | cut -d/ -f3)"
 	say "installing kernel $KREL_NEW (image + dtb + headers) ..."
 	$SUDO dpkg -i "$TMP"/linux-image-*.deb "$TMP"/linux-dtb-*.deb "$TMP"/linux-headers-*.deb \
 		|| die "dpkg failed installing the patched kernel."
