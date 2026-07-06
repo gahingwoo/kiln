@@ -1,5 +1,5 @@
 From a4fa831a8919a19b119e7cf1e898d4a54103023a Mon Sep 17 00:00:00 2001
-From: gahingwoo <huhuvmb88@outlook.com>
+From: Jiaxing Hu <huhuvmb88@outlook.com>
 Date: Wed, 10 Jun 2026 12:11:48 +1200
 Subject: [PATCH] pmdomain/rockchip: add optional per-domain power-on settle
  delay
@@ -20,7 +20,7 @@ rockchip_pmu_restore_qos(), and set 15us for NPUTOP, NPU0 and NPU1
 showed the same symptom during bring-up).  All other domains keep 0,
 so nothing changes for them.
 
-Signed-off-by: Jiaxing Hu <huhuvmb88@gmail.com>
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 ---
  drivers/pmdomain/rockchip/pm-domains.c | 51 ++++++++++++++------------
  1 file changed, 28 insertions(+), 23 deletions(-)

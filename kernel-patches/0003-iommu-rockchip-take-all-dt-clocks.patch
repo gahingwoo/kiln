@@ -1,5 +1,5 @@
 From 0f9b7cb5aafedd340a204e51bc6c79c5dfd9e64d Mon Sep 17 00:00:00 2001
-From: gahingwoo <huhuvmb88@outlook.com>
+From: Jiaxing Hu <huhuvmb88@outlook.com>
 Date: Wed, 10 Jun 2026 16:34:44 +1200
 Subject: [PATCH] iommu/rockchip: take all DT clocks; rk3576: full clock set on
  NPU MMUs (kernel #43)
@@ -22,6 +22,8 @@ gated.
 Switch rk_iommu to devm_clk_bulk_get_all() (identical behaviour for
 every existing devicetree, which all carry exactly aclk + iface) and
 give the RK3576 NPU MMU nodes the full clock set.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 ---
  arch/arm64/boot/dts/rockchip/rk3576.dtsi | 10 ++++----
  drivers/iommu/rockchip-iommu.c           | 30 ++++++++----------------
