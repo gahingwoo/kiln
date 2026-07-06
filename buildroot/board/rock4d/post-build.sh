@@ -42,31 +42,33 @@ install -D -m0755 "$KILN/buildroot/dl/librknnrt.so"  "$TARGET_DIR/usr/lib/librkn
 install -D -m0755 "$KILN/buildroot/dl/libgomp.so.1" "$TARGET_DIR/usr/lib/libgomp.so.1"
 echo "[kiln] installed librkllmrt.so + librknnrt.so + libgomp.so.1 -> /usr/lib/"
 
-# --- 2b. cross-compile the turnkey rkllm_demo (v1.2.0 C API) -----------------
-# Source is tracked at board/rock4d/rkllm_chat.cpp (Qwen ChatML prompt + identity,
-# per-turn benchmark, tokenizer-exception-safe, no example menu). rkllm.h is
-# fetched into dl/. -include cstdint: v1.2.0 rkllm.h omits it and modern g++ needs
-# it. -rpath-link dl: lets ld resolve librkllmrt.so's libgomp.so.1 at link.
-SRC="$KILN/buildroot/board/rock4d/rkllm_chat.cpp"
+# --- 2b. cross-compile the turnkey NPU demos --------------------------------
+# Tracked sources under board/rock4d/: rkllm_chat.cpp (LLM chat, Qwen ChatML +
+# per-turn tok/s benchmark) and rknn_mobilenet.cpp (MobileNet image classification
+# -- the CNN "control experiment"). Headers (rkllm.h, rknn_api.h, stb_image.h) are
+# fetched into dl/. -include cstdint: v1.2.0 rkllm.h omits it. -rpath-link dl
+# resolves librkllmrt.so's libgomp.so.1 at link. The buildroot toolchain is
+# preferred; a host aarch64 g++ + -static-libstdc++ is the fallback for when the
+# buildroot toolchain's crt*.o dev objects were cleaned (avoids a GLIBCXX bump).
 DL="$KILN/buildroot/dl"
-OUT="$TARGET_DIR/usr/bin/rkllm_demo"
-build_demo() {  # $1 = compiler, $2 = extra flags
-	"$1" -include cstdint "$SRC" -I"$DL" -L"$DL" \
-		-Wl,-rpath-link,"$DL" $2 -lrkllmrt -lpthread -o "$OUT"
+build_one() {  # $1 src  $2 out  $3.. link libs
+	src="$1"; out="$2"; shift 2
+	[ -f "$src" ] || { echo "[kiln] WARN: $(basename "$src") missing; skip"; return; }
+	if [ -x "${CROSS}g++" ] && "${CROSS}g++" -include cstdint "$src" -I"$DL" -L"$DL" \
+		-Wl,-rpath-link,"$DL" "$@" -o "$out" 2>/dev/null; then
+		echo "[kiln] built $(basename "$out") (buildroot toolchain)"
+	elif command -v aarch64-linux-gnu-g++ >/dev/null 2>&1 && aarch64-linux-gnu-g++ \
+		-include cstdint "$src" -I"$DL" -L"$DL" -static-libstdc++ -static-libgcc \
+		-Wl,-rpath-link,"$DL" "$@" -o "$out"; then
+		echo "[kiln] built $(basename "$out") (host g++ + static libstdc++)"
+	else
+		echo "[kiln] WARN: build of $(basename "$out") failed; skip"
+	fi
 }
-if [ ! -f "$SRC" ]; then
-	echo "[kiln] WARN: rkllm_chat.cpp missing; skipping demo build"
-elif [ -x "${CROSS}g++" ] && build_demo "${CROSS}g++" "" 2>/dev/null; then
-	echo "[kiln] built + installed /usr/bin/rkllm_demo (buildroot toolchain)"
-elif command -v aarch64-linux-gnu-g++ >/dev/null 2>&1 \
-     && build_demo aarch64-linux-gnu-g++ "-static-libstdc++ -static-libgcc"; then
-	# Fallback for when the buildroot toolchain's dev objects (crt*.o) aren't
-	# present: use a host aarch64 cross g++. -static-libstdc++ avoids depending on
-	# a newer GLIBCXX (gcc 13) than the target's gcc-12 libstdc++ provides.
-	echo "[kiln] built + installed /usr/bin/rkllm_demo (host g++ + static libstdc++)"
-else
-	echo "[kiln] WARN: rkllm_demo build failed / no usable compiler; skipping"
-fi
+build_one "$KILN/buildroot/board/rock4d/rkllm_chat.cpp"     "$TARGET_DIR/usr/bin/rkllm_demo"     -lrkllmrt -lpthread
+build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin/rknn_mobilenet" -lrknnrt -lpthread -lm
+# librknnrt.so alongside librkllmrt.so for the vision demo
+[ -f "$DL/librknnrt.so" ] && install -D -m0644 "$DL/librknnrt.so" "$TARGET_DIR/usr/lib/librknnrt.so"
 
 # --- 3. model (default: NOT baked in; scp after boot) -----------------------
 mkdir -p "$TARGET_DIR/opt/models"

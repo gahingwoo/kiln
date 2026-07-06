@@ -28,11 +28,24 @@ cp "$tmp/rknn-llm/rkllm-runtime/Linux/librkllm_api/aarch64/librkllmrt.so" "$DL/l
 cp "$tmp/rknn-llm/rkllm-runtime/Linux/librkllm_api/include/rkllm.h" "$DL/rkllm.h"
 cp "$tmp/rknn-llm/examples/DeepSeek-R1-Distill-Qwen-1.5B_Demo/deploy/src/llm_demo.cpp" "$DL/llm_demo.cpp"
 
-echo "[kiln] fetching librknnrt.so from rknn-toolkit2 v2.3.0 ..."
+echo "[kiln] fetching librknnrt.so + rknn_api.h from rknn-toolkit2 v2.3.0 ..."
 git clone --filter=blob:none --sparse --depth 1 --branch v2.3.0 \
 	https://github.com/airockchip/rknn-toolkit2.git "$tmp/rknn-toolkit2"
 ( cd "$tmp/rknn-toolkit2" && git sparse-checkout set rknpu2/runtime/Linux/librknn_api )
-cp "$tmp/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so" "$DL/librknnrt.so"
+RKNN_API="$tmp/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api"
+cp "$RKNN_API/aarch64/librknnrt.so" "$DL/librknnrt.so"
+# rknn_api.h for the vision (RKNN) demo -- MobileNet image classification, the
+# CNN "control experiment" alongside the RKLLM matmul path.
+cp "$RKNN_API/include/rknn_api.h" "$DL/rknn_api.h"
+
+# stb_image.h (public domain, single header) decodes the input JPEG/PNG in the
+# vision demo without pulling in a full image library.
+echo "[kiln] fetching stb_image.h (image decoder for the vision demo) ..."
+if command -v curl >/dev/null 2>&1; then
+	curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -o "$DL/stb_image.h"
+else
+	wget -qO "$DL/stb_image.h" https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
+fi
 
 # librkllmrt.so NEEDs libgomp.so.1 (GNU OpenMP), but the buildroot toolchain is
 # built without OpenMP (# BR2_GCC_ENABLE_OPENMP is not set), so no libgomp exists

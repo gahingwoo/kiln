@@ -1,0 +1,25 @@
+#!/bin/sh
+# Kiln: classify an image on the RK3576 NPU (MobileNet via librknnrt / RKNN).
+# The CNN control experiment next to kiln-chat's RKLLM matmul path.
+# Usage: kiln-vision [image.jpg]
+export LD_LIBRARY_PATH=/usr/lib
+MODEL="${KILN_RKNN_MODEL:-/opt/models/mobilenet-rk3576.rknn}"
+LABELS="${KILN_RKNN_LABELS:-/opt/models/imagenet_labels.txt}"
+IMG="${1:-/opt/models/test.jpg}"
+
+# ensure the vendor rknpu driver is loaded (same as kiln-chat)
+if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
+	KO="/lib/modules/$(uname -r)/extra/rknpu.ko"
+	echo "kiln-vision: loading rknpu ..."
+	modprobe rknpu 2>/dev/null || insmod "$KO" 2>/dev/null
+	sleep 1
+fi
+if ! ls /dev/dri/renderD* >/dev/null 2>&1; then
+	echo "kiln-vision: NPU render node not found. Check: dmesg | grep -i rknpu"
+	exit 1
+fi
+[ -f "$MODEL" ] || { echo "kiln-vision: model not found at $MODEL (a *-rk3576.rknn MobileNet)"; exit 1; }
+[ -f "$IMG" ]   || { echo "kiln-vision: image not found: $IMG  (usage: kiln-vision <image.jpg>)"; exit 1; }
+
+echo "=== Kiln RK3576 NPU vision (MobileNet, librknnrt) ==="
+exec rknn_mobilenet "$MODEL" "$IMG" "$LABELS"

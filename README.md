@@ -47,6 +47,12 @@ Bring-up caveats (honest):
   portable by construction (no kernel patches — all fixes are in the module + a
   DT overlay) but not yet tested on an Armbian release.
 
+**Also wired up — image inference (the CNN control experiment):** a MobileNet /
+RKNN path (`librknnrt`) that classifies an image on the same NPU, to confirm the
+driver fix generalises from transformer matmul to convolution. `kiln-vision
+<image>` prints the top-5 ImageNet classes + inference time. You supply a
+converted `mobilenet-rk3576.rknn`; see [`VISION.md`](VISION.md).
+
 ## Build
 
 The whole thing is assembled as a buildroot br2-external:
@@ -85,6 +91,7 @@ guessed open-driver layout.
 - `buildroot/` — br2-external: board config, image scripts, tracked `rkllm_chat.cpp`
 - `scripts/` — build / load / run helpers + `install-armbian.sh`
 - `ARMBIAN.md` — running Kiln on a stock Armbian kernel
+- `VISION.md` — MobileNet / RKNN image inference (the CNN control experiment)
 
 ## Credits
 
