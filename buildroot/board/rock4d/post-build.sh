@@ -10,7 +10,7 @@
 #      buildroot just built, and install it into the target rootfs.
 #   2. Install the version-locked closed runtimes (librkllmrt v1.2.0, librknnrt).
 #   3. Optionally bake the .rkllm model in (KILN_BAKE_MODEL=1); default is to
-#      leave it out (668 MB) and scp it to the board (see docs/BRINGUP.md).
+#      leave it out (668 MB) and scp it to the board.
 set -euo pipefail
 
 KILN="${2:?Kiln repo path missing (BR2_ROOTFS_POST_SCRIPT_ARGS; note \$1 is TARGET_DIR)}"

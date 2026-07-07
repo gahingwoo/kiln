@@ -47,6 +47,6 @@ nodes are removed at the DT level by the Kiln board DTS (`CUSTOM_DTS_PATH`).
 
 `rootfs` is 768 MiB (libs + `rknpu.ko` + headroom). The 668 MB
 `TinyLlama-1.1B-Chat-v1.0-rk3576-w4a16.rkllm` is left out to keep the image small and
-the rebuild fast; `scp` it to `/opt/models` on the board (see `docs/BRINGUP.md` step 5).
+the rebuild fast; `scp` it to `/opt/models` on the board .
 To bake it in instead: `KILN_BAKE_MODEL=1 ./buildroot/build-image.sh` and raise
 `BR2_TARGET_ROOTFS_EXT2_SIZE` to ~1536M in the defconfig.

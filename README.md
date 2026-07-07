@@ -3,7 +3,8 @@
 Run **LLM and vision** inference on the **Rockchip RK3576 NPU** under a
 **mainline** Linux kernel (7.x), by building the vendor GPL `rknpu` driver
 **out-of-tree** and driving it with the closed `librkllmrt` (RKLLM, LLMs) and
-`librknnrt` (RKNN, CNN vision) runtimes.
+`librknnrt` (RKNN, CNN vision) runtimes. Exposed as an integrable local service:
+an **OpenAI-compatible API** (`kiln-serve`) plus a unified config (`kiln-settings`).
 
 The vendor RKLLM/RKNN stack runs multi-matmul LLMs and convolutional vision on
 RK3576 — but on the vendor 6.1 BSP kernel. Kiln puts that same stack (vendor
@@ -51,12 +52,14 @@ TLB per job. Full write-up in [`driver/patches/README.md`](driver/patches/README
 Bring-up caveats (honest):
 
 - The RK3576 NPU power domain needs a **kernel** fix, not just the module: a
-  *cold* power-on works, but a *warm* re-power (the second chat turn, or the first
-  use after a warm reboot) hit mainline's `rockchip_pmu_domain_mem_reset()`, whose
-  NPUTOP power-chain poll never completes on this SoC — the power-on aborted with
-  `-110` and the driver then SError-panicked the whole board reading an unpowered
-  core. Fixed by `kernel-patches/0006` (skip the stuck reset so warm == cold) plus
-  a driver-side bail-on-power-on-failure shim. Multi-turn chat is stable with both.
+  a *cold* NPU power-on yields a working core, but on the **7.1.3 stable** kernel a
+  *warm* re-power (the second chat turn) comes back to `on` status with a **dead
+  core** — the first register read async-SErrors. Kiln keeps the NPU domain
+  **resident** (a driver keep-alive: never power it off once the cold boot probe
+  brings it up), so every use runs on the working cold-armed domain, plus a
+  bail-on-power-on-failure shim so a bad power-on is a clean error, not a board
+  panic. The buildroot linux-next 7.1 kernel runs the full stack (9.3 tok/s); the
+  7.1.3 keep-alive fix is in-tree and pending final on-board confirmation.
 - The orphan MMU's TLB is flushed per-job rather than tracked by the iommu core —
   fine for inference, not a general-purpose iommu fix.
 - The **Armbian** path (DKMS + DT overlay, see [`ARMBIAN.md`](ARMBIAN.md)) is
@@ -69,6 +72,31 @@ generalises from transformer matmul to convolution. `kiln-vision <image>` runs
 MobileNetV2 and prints the top-5 ImageNet classes — **~6 ms / ~160 fps, correct
 labels** on the RK3576 NPU. See [`VISION.md`](VISION.md). (The `.rknn` must be
 version-matched to `librknnrt` — same model/runtime lock as RKLLM.)
+
+## Serve & configure
+
+Kiln is an **integrable local NPU service**, not just a demo. Four tools, one
+config (`/etc/kiln/config.ini`, read by all of them):
+
+- **`kiln-serve`** — an **OpenAI-compatible** HTTP API for the LLM. Point the
+  `openai` SDK / LangChain / any OpenAI client at the board:
+
+  ```sh
+  kiln-serve                       # listens on [server] host/port from the config
+  curl -N http://<board>:8080/v1/chat/completions -H 'Content-Type: application/json' \
+    -d '{"messages":[{"role":"user","content":"hi"}],"stream":true}'
+  ```
+
+  `GET /v1/models`, `POST /v1/chat/completions` (SSE streaming), and an optional
+  `POST /v1/vision/classify`. It reuses the same `librkllmrt` calls as
+  `kiln-chat` — no re-implemented inference — and is header-only
+  (`cpp-httplib` + `nlohmann/json`, no Python). Runs standalone or as a
+  `systemd` service. See [`docs/SERVER.md`](docs/SERVER.md).
+- **`kiln-settings`** — one interactive editor for the whole stack: LLM
+  (model / system prompt / context / sampling / KV-cache history), vision
+  (model / labels / top-N / NPU core mask / priority), and the API server. Only
+  fields the closed runtimes actually expose. See [`docs/CONFIG.md`](docs/CONFIG.md).
+- **`kiln-chat`** / **`kiln-vision`** — the CLIs, now also config-driven.
 
 ## Build
 
@@ -112,9 +140,15 @@ guessed open-driver layout.
 - `driver/patches/` — the one mainline + NPU-execution patch, with a rationale README
 - `driver/compat/` — build-time compat stub headers for BSP-only `soc/rockchip/*`
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM path; DKMS)
-- `buildroot/` — br2-external: board config, image scripts, tracked `rkllm_chat.cpp`
-- `scripts/` — build / load / run helpers + `install-armbian.sh`
-- `ARMBIAN.md` — running Kiln on a stock Armbian kernel
+- `buildroot/board/rock4d/` — the tools' sources: `kiln_config.h` (unified config),
+  `kiln_llm.h` / `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp` (API server),
+  `kiln_settings.cpp`, `rkllm_chat.cpp` / `rknn_mobilenet.cpp` (CLIs)
+- `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build)
+- `kernel-patches-rk3568/` — RK3568 (ROCK 3B) NPU patches (untested; see `RK3568.md`)
+- `capture/` — NPU per-op capture + the rocket cold-start-arm breakthrough probe
+- `docs/SERVER.md`, `docs/CONFIG.md` — kiln-serve API + kiln-settings reference
+- `scripts/kiln-install.sh` — one-shot installer (mainline kernel + module + tools)
+- `ARMBIAN.md`, `MAINLINE-KERNEL.md` — kernel paths
 - `VISION.md` — MobileNet / RKNN image inference (the CNN control experiment)
 
 ## Credits

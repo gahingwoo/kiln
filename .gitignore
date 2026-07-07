@@ -30,7 +30,6 @@ modules.order
 /dirty/
 
 # --- Work-in-progress notes (drafts; will be organised before publishing) ----
-/docs/
 
 # --- OS junk -----------------------------------------------------------------
 .DS_Store
