@@ -1,0 +1,41 @@
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Mon, 7 Jul 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: rk3576: NPU power-domain full clocks + BIU reset
+
+The RK3576 NPU0/NPU1 power domains must run every NPU clock (DSU0 + the
+CBUF gates, not just HCLK_RKNN_ROOT/ACLK_RKNNx) and pulse the RKNN BIU
+reset (SRST_A_RKNNx_BIU) as the domain powers on, or the NPU bus
+interface is left uninitialised: reading an NPU register (e.g. the vendor
+rknpu ioctl RKNPU_GET_HW_VERSION) then raises an asynchronous SError and
+panics. Add the missing clocks + BIU resets to the power-domain nodes;
+the genpd reset-cycle patch pulses the resets on power-on.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+--- a/arch/arm64/boot/dts/rockchip/rk3576.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3576.dtsi
+@@ -1141,14 +1141,22 @@
+ 						power-domain@RK3576_PD_NPU0 {
+ 							reg = <RK3576_PD_NPU0>;
+ 							clocks = <&cru HCLK_RKNN_ROOT>,
+-								 <&cru ACLK_RKNN0>;
++								 <&cru ACLK_RKNN0>,
++								 <&cru CLK_RKNN_DSU0>,
++								 <&cru ACLK_RKNN_CBUF>,
++								 <&cru HCLK_RKNN_CBUF>;
++							resets = <&cru SRST_A_RKNN0_BIU>;
+ 							pm_qos = <&qos_npu_m0>;
+ 							#power-domain-cells = <0>;
+ 						};
+ 						power-domain@RK3576_PD_NPU1 {
+ 							reg = <RK3576_PD_NPU1>;
+ 							clocks = <&cru HCLK_RKNN_ROOT>,
+-								 <&cru ACLK_RKNN1>;
++								 <&cru ACLK_RKNN1>,
++								 <&cru CLK_RKNN_DSU0>,
++								 <&cru ACLK_RKNN_CBUF>,
++								 <&cru HCLK_RKNN_CBUF>;
++							resets = <&cru SRST_A_RKNN1_BIU>;
+ 							pm_qos = <&qos_npu_m1>;
+ 							#power-domain-cells = <0>;
+ 						};

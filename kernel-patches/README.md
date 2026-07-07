@@ -21,13 +21,14 @@ cannot be shipped as a module.
 | file | subsystem | why Kiln needs it | required? |
 |---|---|---|---|
 | `0001-pmdomain-rockchip-npu-settle-delay.patch` | `pmdomain/rockchip` | 15 µs settle delay for the NPUTOP/NPU0/NPU1 domains between de-idle and QoS restore. **This is the fix for the inference freeze / `-110`.** Self-contained; no DT change. | **yes — the fatal one** |
-| `0002-pmdomain-rockchip-cycle-pd-resets.patch` | `pmdomain/rockchip` | Optional per-domain reset pulse on power-on for domains whose bus interface needs a reset edge. Only fires if the power-domain DT node carries `resets` (needs a matching DT change). | optional |
+| `0002-pmdomain-rockchip-cycle-pd-resets.patch` | `pmdomain/rockchip` | Per-domain reset pulse on power-on: reads `resets` on the power-domain node and cycles it. On RK3576 this pulses the NPU **BIU** (bus interface unit) reset (`SRST_A_RKNNx_BIU`) that 0005 adds, so the NPU bus comes up initialised. **Without it, reading an NPU register (rknpu `GET_HW_VERSION` ioctl) async-SErrors and panics** even though the domain is powered. | **yes (with 0005)** |
+| `0005-arm64-dts-rk3576-npu-pd-clocks-biu-reset.patch` | `arm64: dts` | Gives the `power-domain@RK3576_PD_NPU0/1` nodes the full NPU clock set (DSU0 + CBUF gates, not just root/aclk) so every clock runs during the power transition, and adds `resets = <&cru SRST_A_RKNNx_BIU>` for 0002 to pulse. Pairs with 0002. | **yes** |
 | `0003-iommu-rockchip-take-all-dt-clocks.patch` | `iommu/rockchip` | **Driver-only** (split from its old DT hunk): take every DT clock via `devm_clk_bulk_get_all()` instead of the named `aclk`/`iface` pair, so the NPU MMU's extra CBUF/DSU gates run during `rk_iommu_resume` (mainline enables only aclk+iface → the MMU DTE write is silently dropped). Kiln's module also programs the DTE directly, so inference works without it, but this is the correct kernel-side fix. | recommended |
 | `0004-arm64-dts-rk3576-add-vendor-rknpu-node.patch` | `arm64: dts` | Adds the vendor-shaped `npu@27700000` + two v2 IOMMUs to mainline `rk3576.dtsi` and enables it on ROCK 4D with `vdd_npu_s0`. Mainline has **no** NPU compute node (its accel/rocket path uses a different `rknn_core` layout), so this is what the vendor `rknpu` driver binds — the in-tree equivalent of the Armbian DT overlay. | **yes for a mainline build** |
 
-For a **mainline** build apply **0001 + 0003 + 0004** (0002 optional). For the
-Armbian build the DT node comes from the overlay instead, so only **0001** is
-strictly needed there.
+For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005** (the CI does).
+0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU reset
++ full clocks on the power transition) or the first NPU register read SErrors.
 
 ## Provenance
 
