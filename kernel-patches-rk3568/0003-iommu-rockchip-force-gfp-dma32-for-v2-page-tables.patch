@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Mon, 7 Jul 2026 12:00:00 +1200
+Subject: [PATCH] iommu/rockchip: force GFP_DMA32 for v2 page tables
+
+The RK3566/RK3568 IOMMU v2 hardware cannot fetch a page table located\nabove 4 GB, but iommu_data_ops_v2 left .gfp_flags = 0, so on >4GB boards\nthe NPU IOMMU bus-errors. Set GFP_DMA32 like the v1 ops. This is why the\nout-of-tree module alone cannot enable IOMMU on RK3566/68; a kernel build\ncan. Harmless on SoCs (RK3576/RK3588) whose v2 HW can reach >4GB.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+diff --git a/drivers/iommu/rockchip-iommu.c b/drivers/iommu/rockchip-iommu.c
+--- a/drivers/iommu/rockchip-iommu.c
++++ b/drivers/iommu/rockchip-iommu.c
+@@ -1359,7 +1359,13 @@
+ 	.mk_dtentries = &rk_mk_dte_v2,
+ 	.mk_ptentries = &rk_mk_pte_v2,
+ 	.dma_bit_mask = DMA_BIT_MASK(40),
+-	.gfp_flags = 0,
++	/*
++	 * The v2 DTE format encodes >32-bit page-table addresses, but the
++	 * RK3566/RK3568 IOMMU v2 hardware cannot actually fetch a page table
++	 * located above 4 GB -- doing so bus-errors the NPU. Force page tables
++	 * into the DMA32 zone like v1. Harmless on SoCs that can reach >4GB.
++	 */
++	.gfp_flags = GFP_DMA32,
+ };
+ 
+ static const struct of_device_id rk_iommu_dt_ids[] = {
+--
+2.43.0

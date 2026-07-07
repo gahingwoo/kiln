@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Mon, 7 Jul 2026 12:00:00 +1200
+Subject: [PATCH] arm64: dts: rk3568: add vendor RKNPU node + NPU power domain
+
+Mainline has no NPU node for RK3568. Add the vendor-shaped npu@fde40000
+(single core, IOMMU v2 at fde4b000) and the RK3568_PD_NPU power domain so
+the out-of-tree vendor rknpu driver has something to bind. Kept disabled;
+enabled per board. clk_npu is driven from CRU CLK_NPU (RK3568 has no SCMI
+NPU clock); the module runs devfreq-off at the pinned assigned rate.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+diff --git a/arch/arm64/boot/dts/rockchip/rk3568.dtsi b/arch/arm64/boot/dts/rockchip/rk3568.dtsi
+--- a/arch/arm64/boot/dts/rockchip/rk3568.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3568.dtsi
+@@ -414,3 +414,54 @@
+ &vop {
+ 	compatible = "rockchip,rk3568-vop";
+ };
++
++&power {
++	power-domain@RK3568_PD_NPU {
++		reg = <RK3568_PD_NPU>;
++		clocks = <&cru ACLK_NPU_PRE>,
++			 <&cru HCLK_NPU_PRE>,
++			 <&cru PCLK_NPU_PRE>;
++		pm_qos = <&qos_npu>;
++		#power-domain-cells = <0>;
++	};
++};
++
++&{/} {
++	/*
++	 * Vendor RKNPU (out-of-tree rknpu.ko) compute node. Mainline has no NPU
++	 * node for RK3568; this is the in-tree equivalent of the vendor DT, kept
++	 * disabled and enabled per board. Single core, IOMMU v2. clk_npu is driven
++	 * from CRU CLK_NPU (pinned; the module runs with devfreq off), not SCMI
++	 * (RK3568 has no SCMI NPU clock).
++	 */
++	rknpu: npu@fde40000 {
++		compatible = "rockchip,rk3568-rknpu", "rockchip,rknpu";
++		reg = <0x0 0xfde40000 0x0 0x10000>;
++		interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "npu_irq";
++		clocks = <&cru CLK_NPU>, <&cru ACLK_NPU>, <&cru HCLK_NPU>;
++		clock-names = "clk", "aclk", "hclk";
++		assigned-clocks = <&cru CLK_NPU>;
++		assigned-clock-rates = <800000000>;
++		resets = <&cru SRST_A_NPU>, <&cru SRST_H_NPU>;
++		reset-names = "srst_a", "srst_h";
++		power-domains = <&power RK3568_PD_NPU>;
++		iommus = <&rknpu_mmu>;
++		rknpu-supply = <&vdd_npu>;
++		status = "disabled";
++	};
++
++	rknpu_mmu: iommu@fde4b000 {
++		compatible = "rockchip,rk3568-iommu";
++		reg = <0x0 0xfde4b000 0x0 0x40>;
++		/* NOTE: MMU fault IRQ shares the NPU SPI in the vendor DT; verify the
++		 * exact line on real ROCK 3B hardware (midg971). */
++		interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "rknpu_mmu";
++		clocks = <&cru ACLK_NPU>, <&cru HCLK_NPU>;
++		clock-names = "aclk", "iface";
++		power-domains = <&power RK3568_PD_NPU>;
++		#iommu-cells = <0>;
++		status = "disabled";
++	};
++};
+--
+2.43.0
