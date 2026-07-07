@@ -1,58 +1,39 @@
 From b1c0ffee5a5e4c0de0a0b0c0d0e0f00112233445 Mon Sep 17 00:00:00 2001
 From: Jiaxing Hu <huhuvmb88@outlook.com>
 Date: Mon, 7 Jul 2026 12:00:00 +1200
-Subject: [PATCH] pmdomain/rockchip: survive a stuck power chain on NPU warm
- power-on
+Subject: [PATCH] pmdomain/rockchip: force the RK3576 NPU power domain cold on
+ every power-on
 
-On RK3576 the NPU power domains (NPUTOP -> NPU0/NPU1) power on cold when
-the NPU is first used and are power-cycled again on every re-acquire by
-the vendor rknpu driver -- e.g. between two LLM chat turns, or the first
-use after a warm reboot. A cold power-on works. A WARM power-on (domain
-memory retained on) runs rockchip_pmu_domain_mem_reset(), and on this SoC
-its power-*chain* status poll never completes:
+On RK3576 the NPU power domains (NPUTOP -> NPU0/NPU1) only come up with a
+working core after a COLD power-on (domain SRAM was off). A WARM power-on
+(SRAM retained on -- which is the state after the boot probe powers the NPU
+on then off, and between LLM chat turns) reaches the domain "on" status but
+leaves the NPU *core* registers unreadable: the first read
+(rknpu_get_hw_version, NPU base+0x0) async-SErrors and panics the board.
+Cycling the SRAM in rockchip_pmu_domain_mem_reset() during the warm power-on
+is not enough -- the domain reports on (no -110) yet the core still SErrors.
 
-  rockchip-pm-domain ...: failed to get chain status 'nputop', target_on=1, val=0
-  RKNPU 27700000.npu: failed to get pm runtime for npu0, ret: -110
+So make every NPU power-on take the working cold path: power the domain SRAM
+OFF on power-DOWN of the npu* domains, so the next power-on sees
+is_mem_on == false and skips mem_reset entirely, exactly like a cold boot.
+Scoped to the npu* domains by name, so SRAM retention on every other domain
+is unchanged.
 
-The stock code aborts the whole power-on when that poll times out, so the
-domain is left stuck off and the out-of-tree rknpu driver -- which does
-not expect a powered-domain request to fail -- reads an NPU core register
-on the unpowered core and the CPU takes an async SError that panics the
-whole board.
-
-Merely skipping mem_reset does NOT work: the memory power *cycle* it
-performs is exactly what un-sticks the domain, so skipping it just moves
-the failure to the caller's own poll ("failed to set domain 'nputop'
-on"). Instead, make every status poll inside mem_reset() best-effort:
-warn on a timeout but perform the reset writes regardless, and return 0
-so the caller's is_on poll is the arbiter. The mem cycle then brings the
-domain up exactly like the (always-working) cold path.
+Also make rockchip_pmu_domain_mem_reset()'s status polls best-effort (warn,
+don't abort) as a safety net: if a warm power-on ever still happens, it must
+not -110 the power-on into an NPU-driver SError.
 
 Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 ---
- drivers/pmdomain/rockchip/pm-domains.c | 40 ++++++++++++++++----------
- 1 file changed, 25 insertions(+), 15 deletions(-)
+ drivers/pmdomain/rockchip/pm-domains.c | 60 +++++++++++++++++---------
+ 1 file changed, 39 insertions(+), 21 deletions(-)
 
 diff --git a/drivers/pmdomain/rockchip/pm-domains.c b/drivers/pmdomain/rockchip/pm-domains.c
-index 1787f62ba..3c4d5e6f7 100644
+index 1787f62ba..4d5e6f7a8 100644
 --- a/drivers/pmdomain/rockchip/pm-domains.c
 +++ b/drivers/pmdomain/rockchip/pm-domains.c
-@@ -540,14 +540,24 @@
- 	bool is_on;
- 	int ret = 0;
+@@ -542,12 +542,10 @@
  
-+	/*
-+	 * On RK3576 the NPU domains' power *chain* status never reports 'on'
-+	 * here on a warm power-on (domain memory retained). The stock code
-+	 * aborts the power-on when that poll times out, which leaves the
-+	 * domain stuck off (-110) -- and the out-of-tree rknpu driver then
-+	 * reads an unpowered core and takes an async SError that panics the
-+	 * board. But the memory power *cycle* below is exactly what un-sticks
-+	 * the domain (a cold power-on, which never runs this path, always
-+	 * works). So make every status poll here best-effort: warn on a
-+	 * timeout but do the reset writes regardless, and let the caller's own
-+	 * is_on poll be the arbiter of whether the domain actually came up.
-+	 */
  	ret = readx_poll_timeout_atomic(rockchip_pmu_domain_is_chain_on, pd, is_on,
  					is_on == true, 0, 10000);
 -	if (ret) {
@@ -68,7 +49,7 @@ index 1787f62ba..3c4d5e6f7 100644
  
  	udelay(20);
  
-@@ -557,12 +567,10 @@
+@@ -557,12 +555,10 @@
  
  	ret = readx_poll_timeout_atomic(rockchip_pmu_domain_is_mem_on, pd, is_on,
  					is_on == false, 0, 10000);
@@ -85,7 +66,7 @@ index 1787f62ba..3c4d5e6f7 100644
  
  	regmap_write(pmu->regmap, pmu->info->mem_pwr_offset + pd->info->pwr_offset,
  		     pd->info->pwr_w_mask);
-@@ -570,14 +578,12 @@
+@@ -570,14 +566,12 @@
  
  	ret = readx_poll_timeout_atomic(rockchip_pmu_domain_is_mem_on, pd, is_on,
  					is_on == true, 0, 10000);
@@ -105,5 +86,28 @@ index 1787f62ba..3c4d5e6f7 100644
  }
  
  static int rockchip_do_pmu_set_power_domain(struct rockchip_pm_domain *pd,
+@@ -606,6 +600,22 @@
+ 
+ 	wmb();
+ 
++	/*
++	 * KILN/RK3576 NPU: on this SoC a WARM power-on (domain SRAM retained on)
++	 * brings the domain to "on" but leaves the NPU core registers unreadable
++	 * -- reading one async-SErrors the CPU. Only a COLD power-on (SRAM was
++	 * off) yields a working core. So power the SRAM OFF on power-DOWN of the
++	 * NPU domains, forcing every subsequent power-on to take the working cold
++	 * path (is_mem_on == false -> no mem_reset). Scoped to the npu* domains by
++	 * name so retention on other domains is unchanged.
++	 */
++	if (!on && pd->info->mem_status_mask && strstr(genpd->name, "npu")) {
++		regmap_write(pmu->regmap,
++			     pmu->info->mem_pwr_offset + pd_pwr_offset,
++			     (pd->info->pwr_mask | pd->info->pwr_w_mask));
++		wmb();
++	}
++
+ 	if (is_mem_on) {
+ 		ret = rockchip_pmu_domain_mem_reset(pd);
+ 		if (ret)
 --
 2.43.0
