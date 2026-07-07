@@ -1,6 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 # ---------------------------------------------------------------------------
 # blindspot-trace.sh — the "cold-start arm" breakthrough capture.
+# (bash: uses process substitution for the cold-minus-warm diff)
 #
 # The open `rocket` RK3576 driver hits one wall: only the FIRST NPU task per
 # power session does real MACs; every later/chained task engages and DMAs its
