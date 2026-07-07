@@ -1,0 +1,45 @@
+--- a/drivers/rknpu/rknpu_job.c
++++ b/drivers/rknpu/rknpu_job.c
+@@ commit_pc: after first_task/last_task are resolved, before PC_DATA_ADDR write @@
+ 	first_task = &task_base[task_start];
+ 	last_task = &task_base[task_end];
+
++	/*
++	 * CAPTURE: dump the working register command stream of the FIRST job only,
++	 * decoded exactly like the mainline rocket driver's dump so the two are
++	 * directly diff-able. Each 64-bit entry: [63:48]=target [47:16]=value
++	 * [15:0]=register. Read the regcmd buffer through the NPU IOMMU domain.
++	 */
++	{
++		static int dumped;
++
++		if (!dumped) {
++			struct iommu_domain *dom =
++				rknpu_dev->iommu_domains[job->iommu_domain_id];
++			phys_addr_t phys = dom ?
++				iommu_iova_to_phys(dom, first_task->regcmd_addr) : 0;
++
++			dumped = 1;
++			if (phys && pfn_valid(__phys_to_pfn(phys))) {
++				const u64 *rv = (const u64 *)phys_to_virt(phys);
++				u32 i, n = first_task->regcfg_amount;
++
++				pr_info("rknpu cap: regcmd iova=0x%llx phys=0x%llx count=%u core=%d\n",
++					(u64)first_task->regcmd_addr,
++					(u64)phys, n, core_index);
++				for (i = 0; i < n && i < 256; i++) {
++					u64 e = rv[i];
++
++					pr_info("rknpu cap: [%3u] tgt=%04x reg=%04x val=%08x\n",
++						i, (u16)((e >> 48) & 0xffff),
++						(u16)(e & 0xffff),
++						(u32)((e >> 16) & 0xffffffff));
++				}
++			} else {
++				pr_info("rknpu cap: regcmd iova=0x%llx not linear-mappable (phys=0x%llx)\n",
++					(u64)first_task->regcmd_addr, (u64)phys);
++			}
++		}
++	}
++
+ 	if (rknpu_dev->config->pc_dma_ctrl) {
