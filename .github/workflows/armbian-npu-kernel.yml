@@ -25,10 +25,12 @@ on:
         description: "Attach the .deb to a GitHub release"
         type: boolean
         default: true
-  push:
-    paths:
-      - kernel-patches/**
-      - .github/workflows/armbian-npu-kernel.yml
+  # NOTE: manual (workflow_dispatch) only. Kiln ships the PURE-MAINLINE kernel
+  # (mainline-npu-kernel.yml); this Armbian build is kept only to (re)generate the
+  # boot-tested ROCK 4D .config that the mainline build reuses from the
+  # 'armbian-npu-kernel-edge' release. It used to also run on every push to
+  # kernel-patches/**, which rebuilt it needlessly on every mainline patch. Run it
+  # by hand from the Actions tab if the base config ever needs refreshing.
 
 permissions:
   contents: write
