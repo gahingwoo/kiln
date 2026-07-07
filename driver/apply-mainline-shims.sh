@@ -48,5 +48,18 @@ if ! patch -p0 -d "$HERE" --no-backup-if-mismatch < "$PATCH"; then
 	exit 1
 fi
 
+# Supplementary shim: deassert the RKNN core resets in rknpu_power_on(). The
+# mainline U-Boot/ATF on ROCK 4D leaves the NPU core resets ASSERTED (the vendor
+# BSP loader left them deasserted), so on a mainline boot the NPU core registers
+# do not respond to READS -- rknpu_get_hw_version() (base+0x0) async-SErrors and
+# panics, while state_init()'s posted WRITES silently succeed. Deassert them once
+# the domain is powered+clocked (reset.h comes in via rknpu_reset.h; srsts are
+# populated by rknpu_reset_get() at probe). Fold into kiln-mainline.patch later.
+if ! grep -q 'KILN: bring the NPU cores out of reset' "$RKNPU/rknpu_drv.c"; then
+	perl -0pi -e 's{(\n\tif \(rknpu_dev->config->state_init != NULL\))}{\n\t/*\n\t * KILN: bring the NPU cores out of reset -- the mainline bootloader leaves the\n\t * RKNN core resets asserted, so NPU core register reads (GET_HW_VERSION at\n\t * base+0x0) async-SError until deasserted. Domain is powered + clocked here.\n\t */\n\t\{\n\t\tint __ri;\n\t\tfor (__ri = 0; __ri < rknpu_dev->num_srsts; __ri++)\n\t\t\treset_control_deassert(rknpu_dev->srsts[__ri]);\n\t\}\n$1}' \
+		"$RKNPU/rknpu_drv.c" \
+		&& echo "[kiln] applied NPU-core reset-deassert shim."
+fi
+
 echo "[kiln] driver/rknpu is patched for mainline + RK3576 NPU execution."
 echo "[kiln] build with: make KDIR=<your-kernel-build>"
