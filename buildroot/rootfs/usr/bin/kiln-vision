@@ -1,28 +1,22 @@
 #!/bin/sh
 # Kiln: classify an image on the RK3576 NPU (MobileNet via librknnrt / RKNN).
-# The CNN control experiment next to kiln-chat's RKLLM matmul path.
-# Usage: kiln-vision [image.jpg]
+# Config-driven -- model, labels, top-N, NPU core mask and priority come from
+# /etc/kiln/config.ini (edit with `kiln-settings`).
+# Usage: kiln-vision [image.jpg]   (old form: kiln-vision <model.rknn> <image> [labels])
 export LD_LIBRARY_PATH=/usr/lib
-MODEL="${KILN_RKNN_MODEL:-/opt/models/mobilenetv2-12_rk3576.rknn}"
-LABELS="${KILN_RKNN_LABELS:-/opt/models/imagenet_labels.txt}"
-IMG="${1:-/opt/models/test.jpg}"
 
-# ensure the vendor rknpu driver is loaded (same as kiln-chat; normally
-# auto-loaded at boot via /etc/modules-load.d/rknpu.conf).
+# ensure the vendor rknpu driver is loaded (same as kiln-chat).
 if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
 	KO="$(find "/lib/modules/$(uname -r)" -name 'rknpu.ko*' 2>/dev/null | head -1)"
-	[ "$(id -u)" -eq 0 ] && S= || S=sudo   # loading a module needs root
+	[ "$(id -u)" -eq 0 ] && S= || S=sudo
 	echo "kiln-vision: loading rknpu (needs root) ..."
 	$S modprobe rknpu 2>/dev/null || $S insmod "$KO" 2>/dev/null
 	sleep 1
 fi
 if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
 	echo "kiln-vision: rknpu not loaded. Load it as root first:  sudo modprobe rknpu"
-	echo "             (then: sudo dmesg | grep -i rknpu). It normally auto-loads at boot."
 	exit 1
 fi
-[ -f "$MODEL" ] || { echo "kiln-vision: model not found at $MODEL (a *-rk3576.rknn MobileNet)"; exit 1; }
-[ -f "$IMG" ]   || { echo "kiln-vision: image not found: $IMG  (usage: kiln-vision <image.jpg>)"; exit 1; }
 
 echo "=== Kiln RK3576 NPU vision (MobileNet, librknnrt) ==="
-exec rknn_mobilenet "$MODEL" "$IMG" "$LABELS"
+exec rknn_mobilenet "$@"

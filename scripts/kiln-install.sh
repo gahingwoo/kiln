@@ -248,16 +248,18 @@ if [ -f "$DL/rknn_api.h" ]; then
 		-Wl,-rpath-link,"$DL" -lrknnrt -lpthread -lm -o /tmp/rknn_mobilenet \
 	  && $SUDO install -m0755 /tmp/rknn_mobilenet /usr/bin/rknn_mobilenet || say "WARN: rknn_mobilenet build failed"
 fi
-# kiln-serve: OpenAI-compatible API server (LLM). Header-only httplib+json, links
-# the same librkllmrt as kiln-chat. Reuses kiln_llm.h / kiln_config.h.
+# kiln-serve: OpenAI-compatible API server (LLM + optional vision). Header-only
+# httplib+json, links the same librkllmrt/librknnrt. Reuses kiln_llm/vision/config.
 if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
 	g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_serve.cpp -I "$DL" -L "$DL" \
-		-Wl,-rpath-link,"$DL" -lrkllmrt -lpthread -o /tmp/kiln-serve \
+		-Wl,-rpath-link,"$DL" -lrkllmrt -lrknnrt -lpthread -lm -o /tmp/kiln-serve \
 	  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
 fi
+# kiln-settings: interactive unified config editor (no runtime deps).
+g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_settings.cpp -I "$DL" -o /tmp/kiln-settings \
+  && $SUDO install -m0755 /tmp/kiln-settings /usr/bin/kiln-settings || say "WARN: kiln-settings build failed"
 $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
-# kiln-settings + optional systemd unit for kiln-serve
-[ -f buildroot/rootfs/usr/bin/kiln-settings ] && $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-settings /usr/bin/ || true
+# optional systemd unit for kiln-serve
 if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
 	$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/
 	$SUDO systemctl daemon-reload 2>/dev/null || true
@@ -268,6 +270,39 @@ $SUDO mkdir -p /opt/models
 for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do
 	[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
 done
+
+# Seed the unified config (if absent) so kiln-chat/vision/serve/settings share
+# one source of truth. The tools also work with no file (built-in defaults);
+# this just makes the vision model SoC-correct and gives kiln-settings a start.
+$SUDO mkdir -p /etc/kiln
+if [ ! -f /etc/kiln/config.ini ]; then
+	$SUDO tee /etc/kiln/config.ini >/dev/null <<EOF
+# Kiln unified config -- read by kiln-chat, kiln-vision, kiln-serve.
+# Edit with \`kiln-settings\` (or by hand). Only runtime-settable fields.
+
+[llm]
+model = /opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
+max_context_len = 2048
+max_new_tokens = 512
+temperature = 0.8
+top_k = 1
+top_p = 0.95
+keep_history = 0
+system_prompt = You are Qwen, created by Alibaba Cloud. You are a helpful assistant. Always reply in the same language the user writes in.
+
+[vision]
+model = /opt/models/$MODEL_RKNN
+labels = /opt/models/imagenet_labels.txt
+top_n = 5
+core_mask = auto
+priority = high
+
+[server]
+host = 0.0.0.0
+port = 8080
+EOF
+	say "wrote default /etc/kiln/config.ini (edit with kiln-settings)"
+fi
 
 # --- 7. finish --------------------------------------------------------------
 $SUDO depmod -a "$KREL" || true

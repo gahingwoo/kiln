@@ -1,18 +1,16 @@
 #!/bin/sh
-# Kiln: chat with the baked Qwen2.5-1.5B on the RK3576 NPU (librkllmrt v1.2.0).
+# Kiln: chat with an LLM on the RK3576 NPU (librkllmrt). Config-driven -- model,
+# context, sampling, system prompt and KV history come from /etc/kiln/config.ini
+# (edit with `kiln-settings`). Any extra args are forwarded to the binary
+# (old form still works: kiln-chat <model.rkllm> [new_tokens] [ctx]).
 export LD_LIBRARY_PATH=/usr/lib
-MODEL=/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
 
 # ensure the vendor rknpu driver is loaded (normally auto-loaded at boot via
 # /etc/modules-load.d/rknpu.conf; this is a fallback for a fresh, pre-reboot run).
 if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
-	# DKMS installs to updates/dkms/, a plain build to extra/ -- find it either way.
 	KO="$(find "/lib/modules/$(uname -r)" -name 'rknpu.ko*' 2>/dev/null | head -1)"
 	[ "$(id -u)" -eq 0 ] && S= || S=sudo   # loading a module needs root
 	echo "kiln-chat: loading rknpu (needs root) ..."
-	# self-check: vermagic of the on-card module vs the running kernel; a mismatch
-	# means it was built for another kernel -- rebuild it via DKMS.
-	echo "kiln-chat: on-card $(grep -a -o 'vermagic=[^ ]*' "$KO" 2>/dev/null | head -1); kernel=$(uname -r)"
 	$S modprobe rknpu 2>/dev/null || $S insmod "$KO" 2>/dev/null
 	sleep 1
 fi
@@ -21,14 +19,6 @@ if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
 	echo "           (then: sudo dmesg | grep -i rknpu). It normally auto-loads at boot."
 	exit 1
 fi
-if [ ! -f "$MODEL" ]; then
-	echo "kiln-chat: model not found at $MODEL"
-	exit 1
-fi
 
-echo "=== Kiln RK3576 NPU LLM (Qwen2.5-1.5B w4a16, librkllmrt v1.2.0) ==="
 echo "Loading the model onto the NPU (takes a few seconds) ..."
-echo "Then type your question at 'user:'. Type 'exit' or press Ctrl-C to quit."
-echo
-# args: model_path max_new_tokens max_context_len
-exec rkllm_demo "$MODEL" 512 2048
+exec rkllm_demo "$@"

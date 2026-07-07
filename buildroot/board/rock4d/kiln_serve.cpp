@@ -17,8 +17,11 @@
 #include "json.hpp"
 #include "kiln_config.h"
 #include "kiln_llm.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "kiln_vision.h"   // optional /v1/vision/classify (pulls in stb decoder)
 
 #include <atomic>
+#include <memory>
 #include <cstdio>
 #include <ctime>
 #include <string>
@@ -101,6 +104,25 @@ int main(int argc, char **argv) {
     }
     // Pass-through template: we hand the runtime a fully-formed ChatML string.
     llm.set_chat_template("", "", "");
+
+    // Optional vision: only load it if the .rknn exists, so a box that only wants
+    // the LLM doesn't pay for it (and it never crashes when absent).
+    std::unique_ptr<KilnVision> vision;
+    {
+        KilnConfig vc = cfg; vc.vision_model = cfg.server_vision();
+        FILE *vf = fopen(vc.vision_model.c_str(), "rb");
+        if (vf) {
+            fclose(vf);
+            vision.reset(new KilnVision());
+            if (vision->init(vc) != 0) {
+                fprintf(stderr, "kiln-serve: vision disabled (%s)\n", vision->error());
+                vision.reset();
+            } else {
+                printf("kiln-serve: vision ready (%s)\n", vc.vision_model.c_str());
+            }
+        }
+    }
+
     printf("kiln-serve: model ready. Listening on http://%s:%d  (OpenAI /v1)\n",
            cfg.server_host.c_str(), cfg.server_port);
 
@@ -177,6 +199,33 @@ int main(int argc, char **argv) {
                            {"total_tokens", ctx.ntok}}}};
             res.set_content(out.dump(), "application/json");
         }
+    });
+
+    // Optional vision classify. Not an OpenAI standard, so a simple custom shape:
+    // POST an image (raw body, or multipart field `file`); returns top-N classes.
+    srv.Post("/v1/vision/classify", [&](const httplib::Request &req, httplib::Response &res) {
+        if (!vision) {
+            res.status = 503;
+            res.set_content("{\"error\":\"vision not enabled (no .rknn model on this box)\"}", "application/json");
+            return;
+        }
+        std::string img = req.has_file("file") ? req.get_file_value("file").content : req.body;
+        if (img.empty()) {
+            res.status = 400;
+            res.set_content("{\"error\":\"no image; POST raw image bytes or multipart file=\"}", "application/json");
+            return;
+        }
+        int top_n = req.has_param("top_n") ? atoi(req.get_param_value("top_n").c_str()) : cfg.vision_top_n;
+        double ms = 0; std::string err;
+        auto r = vision->classify_encoded((const unsigned char *)img.data(), (int)img.size(), top_n, &ms, &err);
+        if (r.empty() && !err.empty()) {
+            res.status = 400; res.set_content(json{{"error", err}}.dump(), "application/json"); return;
+        }
+        std::string vpath = cfg.server_vision();
+        json top = json::array();
+        for (const auto &x : r) top.push_back({{"index", x.index}, {"label", x.label}, {"score", x.score}});
+        res.set_content(json{{"model", vpath.substr(vpath.find_last_of('/') + 1)},
+                             {"inference_ms", ms}, {"top", top}}.dump(), "application/json");
     });
 
     if (!srv.listen(cfg.server_host.c_str(), cfg.server_port)) {

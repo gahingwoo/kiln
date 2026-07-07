@@ -9,6 +9,8 @@
 // The NPU/runtime handles one generation at a time, so run() is serialized with
 // a mutex -- callers (e.g. the HTTP server) can invoke it from any thread.
 #pragma once
+#include <cstdint>   // rkllm.h uses int32_t/int8_t/size_t but includes neither
+#include <cstddef>
 #include "rkllm.h"
 #include "kiln_config.h"
 #include <functional>
