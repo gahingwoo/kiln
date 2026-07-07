@@ -7,7 +7,8 @@ Mainline has no NPU node for RK3568. Add the vendor-shaped npu@fde40000
 (single core, IOMMU v2 at fde4b000) and the RK3568_PD_NPU power domain so
 the out-of-tree vendor rknpu driver has something to bind. Kept disabled;
 enabled per board. clk_npu is driven from CRU CLK_NPU (RK3568 has no SCMI
-NPU clock); the module runs devfreq-off at the pinned assigned rate.
+NPU clock). rknpu-supply is board-level (PMIC differs per board) so it lives
+in the board dts, not here.
 
 Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 ---
@@ -36,7 +37,8 @@ diff --git a/arch/arm64/boot/dts/rockchip/rk3568.dtsi b/arch/arm64/boot/dts/rock
 +	 * node for RK3568; this is the in-tree equivalent of the vendor DT, kept
 +	 * disabled and enabled per board. Single core, IOMMU v2. clk_npu is driven
 +	 * from CRU CLK_NPU (pinned; the module runs with devfreq off), not SCMI
-+	 * (RK3568 has no SCMI NPU clock).
++	 * (RK3568 has no SCMI NPU clock). rknpu-supply is board-level (the PMIC
++	 * regulator differs per board), so it is set in the board dts, not here.
 +	 */
 +	rknpu: npu@fde40000 {
 +		compatible = "rockchip,rk3568-rknpu", "rockchip,rknpu";
@@ -51,7 +53,6 @@ diff --git a/arch/arm64/boot/dts/rockchip/rk3568.dtsi b/arch/arm64/boot/dts/rock
 +		reset-names = "srst_a", "srst_h";
 +		power-domains = <&power RK3568_PD_NPU>;
 +		iommus = <&rknpu_mmu>;
-+		rknpu-supply = <&vdd_npu>;
 +		status = "disabled";
 +	};
 +
