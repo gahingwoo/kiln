@@ -101,6 +101,10 @@ install_patched_aic8800(){
 	$SUDO rm -rf "/usr/src/$pkg-$ver"; $SUDO mkdir -p "/usr/src/$pkg-$ver"
 	$SUDO cp -r "$src/a/src/USB" "/usr/src/$pkg-$ver/"
 	sed "s/#MODULE_VERSION#/$ver/g" "$src/a/debian/aic8800-usb-dkms.dkms" | $SUDO tee "/usr/src/$pkg-$ver/dkms.conf" >/dev/null
+	# Firmware: aic_load_fw loads blobs from /lib/firmware/<chip>/ (the chip is
+	# auto-detected, e.g. aic8800D80). Without them the USB bus never comes up
+	# ("bus is not up"). Install the whole USB firmware tree there.
+	$SUDO cp -a "$src/a/src/USB/driver_fw/fw/." /lib/firmware/ 2>/dev/null || true
 	$SUDO dkms add "$pkg/$ver" >/dev/null 2>&1 || true
 	if $SUDO dkms build "$pkg/$ver" -k "$k" >/dev/null 2>&1 && $SUDO dkms install "$pkg/$ver" -k "$k" >/dev/null 2>&1; then
 		say "  aic8800 wifi/bt built and installed for $k."

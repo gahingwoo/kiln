@@ -31,6 +31,16 @@ paths. Touched (in `src/USB/driver_fw/drivers/aic8800/aic8800_fdrv/`):
 
 The BT half (`aic_btusb`) builds unchanged on 7.1.3.
 
+## Firmware (also required)
+
+The driver is only half of it: `aic_load_fw` downloads chip firmware from
+`/lib/firmware/<chip>/` (the chip is auto-detected — on the ROCK 4D it is the
+**AIC8800D80**, so `/lib/firmware/aic8800D80/fw_patch_table_8800d80_u02.bin` etc.).
+Without matching firmware the USB bus never comes up (`bus is not up`, no `wlan0`).
+The stock aic8800-firmware package (paired with the old v4 driver) is a version
+mismatch for the v5 driver, so `kiln-install.sh` also copies
+`src/USB/driver_fw/fw/*` from the v5 tree into `/lib/firmware/`.
+
 ## Status
 
 Verified to **compile** against a mainline 7.1.3 tree (`aic8800_fdrv.ko` links,
