@@ -66,6 +66,23 @@ static std::string base_of(const std::string &path) {
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
+// Flatten a model-produced summary to one safe line before folding it into the
+// system prompt: a multi-line summary (or one with "Name:" speaker labels) reads
+// as a transcript and makes the model role-play, so collapse newlines/tabs to
+// spaces, squeeze runs of spaces, and cap the length.
+static std::string sanitize_summary(const std::string &in) {
+    std::string flat;
+    bool sp = false;
+    for (char c : in) {
+        char ch = (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;
+        if (ch == ' ') { if (!sp) flat += ' '; sp = true; }
+        else { flat += ch; sp = false; }
+    }
+    flat = trim(flat);
+    if (flat.size() > 400) flat = flat.substr(0, 400) + "...";
+    return flat;
+}
+
 // List *.rkllm files in a directory (sorted). Lightweight: POSIX dirent, no
 // <filesystem> so the buildroot toolchain needs no extra link.
 static std::vector<std::string> list_models(const std::string &dir) {
@@ -190,6 +207,7 @@ static void print_help(const KilnConfig &cfg, const ChatState &st) {
            "  /history [on|off] multi-turn memory on/off (no arg: show)\n"
            "  /system [text|clear] show/set/clear the system prompt (resets the session)\n"
            "  /context         show the context window and what is in use\n"
+           "  /compact         summarize the conversation to free up context\n"
            "  /model [name]    list models, or switch to one (reloads, takes a few s)\n"
            "  /exit, /quit     leave\n");
 }
@@ -261,7 +279,34 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         printf("context window: %d tokens\n", cfg.llm_max_context_len);
         printf("history: %s | turns: %ld | generated tokens: %ld\n",
                cfg.llm_keep_history ? "on" : "off", st.turns, st.gen_tokens);
-        printf("(prompt-side token usage is not exposed by the runtime; use /clear or /new to reset)\n");
+        printf("(prompt-side token usage is not exposed by the runtime; use /compact to summarize, or /clear to reset)\n");
+        return true;
+    }
+
+    if (cmd == "/compact") {
+        if (st.turns == 0) { printf("[nothing to compact]\n"); return true; }
+        printf("[compacting: summarizing the conversation ...]\n");
+        fflush(stdout);
+        GenResult s = generate(llm,
+            "Summarize the key facts and context of this conversation in two or "
+            "three sentences (the user's name, preferences, and the current topic) "
+            "so it can continue. Plain prose only -- no dialogue, no line breaks.",
+            /*keep_history*/true, /*echo*/false);
+        std::string summary = sanitize_summary(s.text);
+        if (s.error || summary.empty()) { printf("[compact failed; conversation left as-is]\n"); return true; }
+        // Application-level approximation: the runtime has no KV compaction, so the
+        // only place to re-inject context is the system prompt. Fold in the
+        // (single-line, capped) summary and clear the KV. Cost: one extra
+        // inference; quality is bounded by the model. Safe now because a bad
+        // summary can no longer cause a runaway -- generation stops on the EOS
+        // token ID / role-label stop sequence (see kiln_llm.h).
+        std::string sys = st.base_system.empty()
+            ? ("Earlier conversation summary: " + summary)
+            : (st.base_system + " Earlier conversation summary: " + summary);
+        llm.set_system_prompt(sys);
+        st.turns = 0; st.gen_tokens = 0;
+        printf("[compacted -- earlier turns replaced by this summary (app-level, 1 inference):]\n%s\n",
+               summary.c_str());
         return true;
     }
 
