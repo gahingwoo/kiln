@@ -23,10 +23,10 @@ control experiment that proved the driver fix generalises.)
 
 **It works.** On real hardware (ROCK 4D, RK3576) on a mainline kernel, **both**
 the RKLLM LLM stack and the RKNN vision stack run on the NPU: `kiln-chat` holds a
-multi-turn Qwen2.5-1.5B conversation (9.3 tok/s) and `kiln-vision` classifies
-images (~169 fps), on a **pure mainline `linux-7.1.3`** kernel built by CI with
-Kiln's patch set (`kernel-patches/` 0001–0010) — not just the earlier hand-built
-`linux-next` image.
+multi-turn conversation — **Qwen2.5-1.5B (9.3 tok/s) or Llama-3.2-1B (~13 tok/s)**,
+switchable live with `/model` — and `kiln-vision` classifies images (~169 fps), on
+a **pure mainline `linux-7.1.3`** kernel built by CI with Kiln's patch set
+(`kernel-patches/` 0001–0010) — not just the earlier hand-built `linux-next` image.
 
 Verified end-to-end (first on a hand-built `linux-next` 7.1 image, then on the
 pure-mainline 7.1.3 CI kernel):
@@ -43,9 +43,10 @@ pure-mainline 7.1.3 CI kernel):
 **Full serial log** — boot → `rknpu 0.9.8` loads → all four MMU banks enabled →
 MobileNetV2 vision (~161 fps) and Qwen2.5-1.5B chat (9.3 tok/s), both on the NPU:
 [**gist**](https://gist.github.com/gahingwoo/545f90ed2b0e7542e2953e089c60ee01).
-Pure **mainline linux-7.1.3** run (`kiln-chat` with slash commands + `kiln-vision`,
-9 tok/s / 169 fps):
-[**gist**](https://gist.github.com/gahingwoo/abaa95815953b904346b6c74a1c0fc8a).
+**Live demo** on **pure mainline linux-7.1.3** (Armbian): `fastfetch` (Kernel
+7.1.3) → `kiln-chat` running **Qwen2.5-1.5B and Llama-3.2-1B** with a live `/model`
+switch and multi-turn memory (8–13 tok/s) → `kiln-vision` MobileNet (170 fps):
+[**gist**](https://gist.github.com/gahingwoo/63f5505068de0a41f718499912ae0265).
 
 The core porting problem — and why a naive port only produces `task_counter=0`
 timeouts — is that the NPU is **one device with two IOMMUs**, but mainline
