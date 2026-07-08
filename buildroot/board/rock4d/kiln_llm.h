@@ -16,6 +16,8 @@
 #include <functional>
 #include <string>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 
 // Per-run routing context handed to the C callback via rkllm_run()'s userdata.
@@ -24,26 +26,44 @@ struct KilnRunCtx {
     std::function<void(bool had_error)> on_finish;   // generation ended
     long ntok = 0;
     std::function<void()> request_abort;             // set by run(); stops generation
-    bool stopped = false;                            // a stop marker was seen
+    bool stopped = false;                            // a stop token was seen
 };
 
-// ChatML turn terminator / EOS. skip_special_token is off (see init) so these
-// reach us as text; the runtime does not always halt on them (model/convert
-// dependent), so we detect them, emit only the text before, and abort.
+// Qwen2.5 ChatML turn/END token IDs: <|endoftext|>=151643, <|im_end|>=151645.
+// ROOT CAUSE of "never stops": this RKLLM build does NOT flag Qwen's added
+// special tokens as special, so <|im_end|> is neither treated as EOS nor skipped
+// -- it is detokenized as ordinary vocab text (observed as "IBAction") and
+// generation runs on to max_new_tokens. Detecting the *text* "<|im_end|>" cannot
+// work (it never appears as that string); the token ID is decoding-independent,
+// so we stop on the ID. Confirm the IDs on hardware with KILN_DEBUG_TOKENS=1.
+static inline bool kiln_is_stop_id(int32_t id) { return id == 151643 || id == 151645; }
+
+// Text fallback, in case a build DOES decode the marker to a string.
 static const char *const KILN_STOP_MARKERS[] = { "<|im_end|>", "<|endoftext|>", "<|im_start|>" };
 
 // Single C callback for rkllm_init; routes each result to the run's context.
 static void kiln_llm_callback(RKLLMResult *result, void *userdata, LLMCallState state) {
     KilnRunCtx *ctx = static_cast<KilnRunCtx *>(userdata);
     if (state == RKLLM_RUN_NORMAL) {
-        if (!ctx || !result || !result->text || ctx->stopped) return;
+        if (!ctx || !result || ctx->stopped) return;
+        static const bool dbg = getenv("KILN_DEBUG_TOKENS") != nullptr;
+        if (dbg) fprintf(stderr, "\n[tok id=%d \"%s\"]", result->token_id,
+                         result->text ? result->text : "");
+        // Primary stop: the turn-terminator token ID (robust to mis-decoding).
+        if (kiln_is_stop_id(result->token_id)) {
+            ctx->stopped = true;
+            if (ctx->request_abort) ctx->request_abort();
+            if (ctx->on_finish) ctx->on_finish(false);
+            return;
+        }
+        if (!result->text) return;
         std::string t = result->text;
-        size_t cut = std::string::npos;
+        size_t cut = std::string::npos;   // fallback: marker decoded to text
         for (const char *m : KILN_STOP_MARKERS) {
             size_t p = t.find(m);
             if (p != std::string::npos && p < cut) cut = p;
         }
-        if (cut != std::string::npos) {          // hit a turn boundary -> stop here
+        if (cut != std::string::npos) {
             if (cut > 0 && ctx->on_token) { ctx->ntok++; ctx->on_token(t.substr(0, cut).c_str()); }
             ctx->stopped = true;
             if (ctx->request_abort) ctx->request_abort();
@@ -75,9 +95,10 @@ public:
         param.frequency_penalty = cfg.llm_frequency_penalty;
         param.presence_penalty  = cfg.llm_presence_penalty;
         if (cfg.llm_n_keep >= 0) param.n_keep = cfg.llm_n_keep;
-        // Keep special tokens visible so our callback can see the ChatML turn
-        // terminator (<|im_end|>) and stop there; we strip it before display.
-        param.skip_special_token = false;
+        // Hide special tokens from output; stopping is handled by token ID in the
+        // callback (kiln_is_stop_id), which works even though this build mis-decodes
+        // <|im_end|> as ordinary text instead of treating it as special.
+        param.skip_special_token = true;
         param.extend_param.base_domain_id = 0;
         param.extend_param.embed_flash    = (int8_t)cfg.llm_embed_flash;
 
