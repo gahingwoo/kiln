@@ -103,10 +103,13 @@ config (`/etc/kiln/config.ini`, read by all of them):
   `kiln-chat` — no re-implemented inference — and is header-only
   (`cpp-httplib` + `nlohmann/json`, no Python). Runs standalone or as a
   `systemd` service. See [`docs/SERVER.md`](docs/SERVER.md).
-- **`kiln-chat`** — the interactive LLM CLI, with **slash commands** to manage
-  the session: `/model` to list or switch models (arrow-key picker), `/system`
-  to set the system prompt, `/history` for multi-turn memory, `/clear` / `/new`,
-  `/context`. Type `/help`. See [`docs/CHAT.md`](docs/CHAT.md).
+- **`kiln-chat`** — the interactive LLM CLI. Runs any RKLLM `.rkllm` model —
+  the chat template + stop tokens auto-select for **Qwen/ChatML** or **Llama-3**.
+  Readline input (cursor editing + history), and **slash commands** to manage the
+  session: `/model` to list/switch models (arrow-key picker), `/system` to set the
+  prompt, `/history` for multi-turn memory, `/clear` / `/new`, `/context`. `/model`,
+  `/system`, `/history` persist to the config. Type `/help`. See
+  [`docs/CHAT.md`](docs/CHAT.md).
 - **`kiln-vision`** — the image-classification CLI.
 
 All three read `/etc/kiln/config.ini` (edit it by hand — the fields are the ones

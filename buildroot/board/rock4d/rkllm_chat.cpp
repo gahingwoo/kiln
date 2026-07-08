@@ -261,7 +261,7 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         printf("context window: %d tokens\n", cfg.llm_max_context_len);
         printf("history: %s | turns: %ld | generated tokens: %ld\n",
                cfg.llm_keep_history ? "on" : "off", st.turns, st.gen_tokens);
-        printf("(prompt-side token usage is not exposed by the runtime; use /compact if replies degrade)\n");
+        printf("(prompt-side token usage is not exposed by the runtime; use /clear or /new to reset)\n");
         return true;
     }
 
