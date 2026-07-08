@@ -44,23 +44,6 @@ static std::string base_of(const std::string &path) {
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-// Flatten a model-produced summary to one safe line before folding it into the
-// system prompt. A multi-line summary (or one with "Name:" speaker labels) reads
-// as a chat transcript and makes the model keep role-playing and never stop, so
-// we collapse newlines/tabs to spaces, squeeze runs of spaces, and cap length.
-static std::string sanitize_summary(const std::string &in) {
-    std::string flat;
-    bool sp = false;
-    for (char c : in) {
-        char ch = (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;
-        if (ch == ' ') { if (!sp) flat += ' '; sp = true; }
-        else { flat += ch; sp = false; }
-    }
-    flat = trim(flat);
-    if (flat.size() > 300) flat = flat.substr(0, 300) + "...";
-    return flat;
-}
-
 // List *.rkllm files in a directory (sorted). Lightweight: POSIX dirent, no
 // <filesystem> so the buildroot toolchain needs no extra link.
 static std::vector<std::string> list_models(const std::string &dir) {
@@ -185,7 +168,6 @@ static void print_help(const KilnConfig &cfg, const ChatState &st) {
            "  /history [on|off] multi-turn memory on/off (no arg: show)\n"
            "  /system [text]   show or set the system prompt (resets the session)\n"
            "  /context         show the context window and what is in use\n"
-           "  /compact         summarize the conversation to free up context\n"
            "  /model [name]    list models, or switch to one (reloads, takes a few s)\n"
            "  /exit, /quit     leave\n");
 }
@@ -243,29 +225,6 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         printf("history: %s | turns: %ld | generated tokens: %ld\n",
                cfg.llm_keep_history ? "on" : "off", st.turns, st.gen_tokens);
         printf("(prompt-side token usage is not exposed by the runtime; use /compact if replies degrade)\n");
-        return true;
-    }
-
-    if (cmd == "/compact") {
-        if (st.turns == 0) { printf("[nothing to compact]\n"); return true; }
-        printf("[compacting: asking the model to summarize the conversation ...]\n");
-        fflush(stdout);
-        GenResult s = generate(llm,
-            "In one or two plain sentences, note the important facts from this "
-            "conversation (the user's name, preferences, and the current topic). "
-            "Write prose only -- no dialogue, no speaker labels, no line breaks.",
-            /*keep_history*/true, /*echo*/false);
-        std::string summary = sanitize_summary(s.text);
-        if (s.error || summary.empty()) { printf("[compact failed; conversation left as-is]\n"); return true; }
-        // Fold the (single-line, capped) summary into the system prompt and clear
-        // the KV. Application-level approximation: the runtime has no KV
-        // compaction, so it costs one extra inference and the long history becomes
-        // this summary. Quality is bounded by the model -- on a small model the
-        // summary can be rough; sanitizing keeps a bad one from breaking the session.
-        llm.set_system_prompt(st.base_system + " Earlier context: " + summary);
-        st.turns = 0; st.gen_tokens = 0;
-        printf("[compacted -- earlier turns replaced by this summary (app-level, cost 1 inference):]\n%s\n",
-               summary.c_str());
         return true;
     }
 

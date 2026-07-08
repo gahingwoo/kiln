@@ -20,7 +20,6 @@ before writing it to the file.
 | `/history [on\|off]` | multi-turn memory on/off; no argument shows the current state |
 | `/system [text]` | show the system prompt, or set it (resets the session) |
 | `/context` | show the context window and session counters |
-| `/compact` | summarize the conversation to free up context |
 | `/model [name]` | switch model; with no name, pick from a list with the arrow keys |
 | `/exit`, `/quit` | leave |
 
@@ -49,15 +48,15 @@ not change the inference path. What the closed runtime actually supports:
   KV usage nor a tokenizer, so it reports the context window size and what can be
   counted exactly (turns and tokens the model generated). Prompt-side token usage
   is not observable from the API.
-- **`/compact`** is an **application-level approximation**: the runtime has no KV
-  compaction, so `/compact` asks the model to summarize the conversation (one
-  extra inference), then replaces the earlier turns with that summary folded into
-  the system prompt. It frees context at the cost of one generation and whatever
-  the summary leaves out.
 
-A `/rewind`-style undo is intentionally absent: the runtime has no KV
-snapshot/restore that would make it reliable, and faking it would change the
-inference path.
+Two commands are deliberately absent. A `/compact` (summarize-to-free-context)
+was tried and removed: the runtime has no KV compaction, so the only place to
+put a summary back is the system prompt, and on a small model that makes it
+recite the prompt and never stop -- a broken feature is worse than none. A
+`/rewind` undo is absent for the same class of reason: there is no KV
+snapshot/restore that would make it reliable. Both need runtime support (or a
+larger model) that is not there today. To shorten a long chat, use `/clear` or
+`/new`.
 
 ## Persisting changes
 
