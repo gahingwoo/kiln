@@ -23,18 +23,37 @@ struct KilnRunCtx {
     std::function<void(const char *token)> on_token; // one decoded token chunk
     std::function<void(bool had_error)> on_finish;   // generation ended
     long ntok = 0;
+    std::function<void()> request_abort;             // set by run(); stops generation
+    bool stopped = false;                            // a stop marker was seen
 };
+
+// ChatML turn terminator / EOS. skip_special_token is off (see init) so these
+// reach us as text; the runtime does not always halt on them (model/convert
+// dependent), so we detect them, emit only the text before, and abort.
+static const char *const KILN_STOP_MARKERS[] = { "<|im_end|>", "<|endoftext|>", "<|im_start|>" };
 
 // Single C callback for rkllm_init; routes each result to the run's context.
 static void kiln_llm_callback(RKLLMResult *result, void *userdata, LLMCallState state) {
     KilnRunCtx *ctx = static_cast<KilnRunCtx *>(userdata);
     if (state == RKLLM_RUN_NORMAL) {
-        if (ctx && result && result->text) {
-            ctx->ntok++;
-            if (ctx->on_token) ctx->on_token(result->text);
+        if (!ctx || !result || !result->text || ctx->stopped) return;
+        std::string t = result->text;
+        size_t cut = std::string::npos;
+        for (const char *m : KILN_STOP_MARKERS) {
+            size_t p = t.find(m);
+            if (p != std::string::npos && p < cut) cut = p;
         }
+        if (cut != std::string::npos) {          // hit a turn boundary -> stop here
+            if (cut > 0 && ctx->on_token) { ctx->ntok++; ctx->on_token(t.substr(0, cut).c_str()); }
+            ctx->stopped = true;
+            if (ctx->request_abort) ctx->request_abort();
+            if (ctx->on_finish) ctx->on_finish(false);
+            return;
+        }
+        ctx->ntok++;
+        if (ctx->on_token) ctx->on_token(t.c_str());
     } else if (state == RKLLM_RUN_FINISH) {
-        if (ctx && ctx->on_finish) ctx->on_finish(false);
+        if (ctx && !ctx->stopped && ctx->on_finish) ctx->on_finish(false);
     } else if (state == RKLLM_RUN_ERROR) {
         if (ctx && ctx->on_finish) ctx->on_finish(true);
     }
@@ -56,7 +75,9 @@ public:
         param.frequency_penalty = cfg.llm_frequency_penalty;
         param.presence_penalty  = cfg.llm_presence_penalty;
         if (cfg.llm_n_keep >= 0) param.n_keep = cfg.llm_n_keep;
-        param.skip_special_token = true;
+        // Keep special tokens visible so our callback can see the ChatML turn
+        // terminator (<|im_end|>) and stop there; we strip it before display.
+        param.skip_special_token = false;
         param.extend_param.base_domain_id = 0;
         param.extend_param.embed_flash    = (int8_t)cfg.llm_embed_flash;
 
@@ -89,6 +110,7 @@ public:
     // Blocks until generation finishes; tokens arrive on ctx.on_token.
     int run(const std::string &prompt, bool keep_history, KilnRunCtx &ctx) {
         std::lock_guard<std::mutex> lk(mu_);
+        ctx.request_abort = [this]{ if (h_) rkllm_abort(h_); };
         RKLLMInput input;
         memset(&input, 0, sizeof(input));
         input.input_type = RKLLM_INPUT_PROMPT;
