@@ -22,9 +22,10 @@ struct KilnConfig {
     std::string llm_model            = "/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm";
     int         llm_max_context_len  = 2048;
     int         llm_max_new_tokens   = 512;
-    int         llm_top_k            = 20;    // Qwen2.5-recommended sampling; >1 avoids
-    float       llm_top_p            = 0.8f;  // greedy-decode junk-token loops, not so
-    float       llm_temperature      = 0.7f;  // wide that the model rambles past its EOS
+    int         llm_top_k            = 1;     // greedy: most coherent on the 1.5B w4a16
+    float       llm_top_p            = 0.8f;  // model (sampling makes it hallucinate off-
+    float       llm_temperature      = 0.7f;  // topic). Clean stop comes from kiln_is_stop_id,
+                                              // not from the sampling, so greedy is safe now.
     float       llm_repeat_penalty   = 1.1f;
     float       llm_frequency_penalty= 0.0f;
     float       llm_presence_penalty = 0.0f;
