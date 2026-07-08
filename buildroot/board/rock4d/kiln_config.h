@@ -26,7 +26,7 @@ struct KilnConfig {
     float       llm_top_p            = 0.8f;  // model (sampling makes it hallucinate off-
     float       llm_temperature      = 0.7f;  // topic). Clean stop comes from kiln_is_stop_id,
                                               // not from the sampling, so greedy is safe now.
-    float       llm_repeat_penalty   = 1.1f;
+    float       llm_repeat_penalty   = 1.3f;   // break greedy repetition loops on the small model
     float       llm_frequency_penalty= 0.0f;
     float       llm_presence_penalty = 0.0f;
     int         llm_embed_flash      = 1;    // query word-embeddings from flash
