@@ -1,0 +1,71 @@
+From c0ffee00000000000000000000000000000009aa Mon Sep 17 00:00:00 2001
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Tue, 8 Jul 2026 12:00:00 +1200
+Subject: [PATCH] pmdomain/rockchip: arm the RK3576 NPU core on power-on
+
+On a mainline kernel the NPU core register block (base+0x0) is unreadable from
+a later userspace ioctl: the vendor rknpu GET_HW_VERSION async-SErrors or hangs
+the whole board. The vendor BSP kernel touches the NPU core (reads the version
+register, cycles the MMU bank DTE regs) DURING the power-domain power-on, right
+after the BIU reset -- and that access is what leaves the core "armed" so it can
+be read afterwards. Mainline never does it, so on Kiln the core comes up on but
+dead. Do the same touch in rockchip_pd_power()'s power-on path (scoped to the
+npu0 domain). This is the missing "cold-start arm": the working buildroot
+linux-next kernel carries it (as a bring-up hook); Kiln's stock 7.1.3 did not,
+and every kiln-chat run wedged reading base+0x0.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+ drivers/pmdomain/rockchip/pm-domains.c | 31 ++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/drivers/pmdomain/rockchip/pm-domains.c b/drivers/pmdomain/rockchip/pm-domains.c
+index aaaaaaaaa..bbbbbbbbb 100644
+--- a/drivers/pmdomain/rockchip/pm-domains.c
++++ b/drivers/pmdomain/rockchip/pm-domains.c
+@@ -627,6 +627,34 @@
+ 	return 0;
+ }
+ 
++/*
++ * KILN: arm the RK3576 NPU core on power-on. On a mainline kernel the NPU core
++ * register block (base+0x0) is unreadable from a later userspace ioctl -- the
++ * vendor rknpu GET_HW_VERSION async-SErrors / hangs the bus -- UNLESS it is
++ * touched here, in the power-domain power-on path right after the BIU reset. The
++ * vendor BSP kernel does an equivalent access during the NPU power transition;
++ * without it the core comes up "on" but dead. Read the version register and
++ * cycle the MMU bank DTE regs so the core comes up armed. Scoped to npu0.
++ */
++static void rk3576_npu_pd_arm(struct rockchip_pm_domain *pd, bool power_on)
++{
++	static void __iomem *npu0_base;
++
++	if (!power_on || strcmp(pd->genpd.name, "npu0"))
++		return;
++	if (!npu0_base)
++		npu0_base = ioremap(0x27700000, 0x4000);
++	if (!npu0_base)
++		return;
++	readl(npu0_base + 0x0);			/* pc VERSION -- the arming access */
++	writel(0xdeadb000, npu0_base + 0x2000);	/* MMU bank0 DTE_ADDR */
++	readl(npu0_base + 0x2000);
++	writel(0xdeadb000, npu0_base + 0x2100);	/* MMU bank1 DTE_ADDR */
++	readl(npu0_base + 0x2100);
++	writel(0, npu0_base + 0x2000);
++	writel(0, npu0_base + 0x2100);
++}
++
+ static int rockchip_pd_power(struct rockchip_pm_domain *pd, bool power_on)
+ {
+ 	struct rockchip_pmu *pmu = pd->pmu;
+@@ -674,6 +702,8 @@
+ 		}
+ 
+ 		rockchip_pmu_restore_qos(pd);
++
++		rk3576_npu_pd_arm(pd, power_on);
+ 	}
+ 
+ out:
+--
+2.43.0

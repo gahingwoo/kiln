@@ -30,8 +30,9 @@ cannot be shipped as a module.
 | `0007-iommu-rockchip-skip-orphaned-fault-banks-in-stall-active.patch` | `iommu/rockchip` | The RK3576 NPU MMU banks can boot with an orphaned `PAGE_FAULT_ACTIVE` (no stall, idle) left by firmware. `rk_iommu_is_stall_active()` then reports the whole IOMMU "not stalled" forever, so `rk_iommu_resume()`'s stall poll never passes. Skip those quiescent banks. **The buildroot linux-next kernel that runs the stack carries this; Kiln's 7.1.3 omitted it, and a stall-poll timeout during the NPU's iommu resume can stall the shared PMU path → `cpu _set_opp_voltage … -110` → board wedge.** | **yes** |
 | `0008-iommu-rockchip-skip-orphaned-fault-banks-in-enable-stall.patch` | `iommu/rockchip` | Same orphaned-fault banks: don't send `CMD_ENABLE_STALL` to them — the dropped command also delays the *other* banks past the poll timeout. Pairs with 0007. | **yes** |
 
-For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005 + 0006 + 0007 +
-0008** (the CI does). 0007/0008 (iommu stall on orphaned-fault banks) match the
+| `0009-pmdomain-rockchip-arm-the-rk3576-npu-core-on-power-on.patch` | `pmdomain/rockchip` | **The cold-start arm.** On mainline the NPU core register block (`base+0x0`) is unreadable from a later ioctl -- vendor rknpu `GET_HW_VERSION` async-SErrors / hangs the board -- unless it is touched *during* the power-domain power-on, right after the BIU reset. The vendor BSP / the working buildroot linux-next kernel do exactly this; mainline never does, so the core comes up "on" but dead. Read `base+0x0` + cycle the MMU bank DTE regs in `rockchip_pd_power()` (npu0). **This is the fix for the kiln-chat wedge that survived 0001-0008.** | **yes** |
+
+For a **mainline** build apply **0001 … 0009** (the CI does). 0007/0008 (iommu stall on orphaned-fault banks) match the
 buildroot linux-next kernel that runs the full stack at 9.3 tok/s; without them
 the NPU's iommu resume stall-poll can time out and wedge the board via CPU DVFS. 0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU
 reset + full clocks on the power transition) or the first NPU register read SErrors,
