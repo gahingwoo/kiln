@@ -23,6 +23,8 @@
 #include <csignal>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <termios.h>
+#include <unistd.h>
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -61,6 +63,51 @@ static std::vector<std::string> list_models(const std::string &dir) {
 static bool file_exists(const std::string &p) {
     struct stat st;
     return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Arrow-key picker for a short list. Returns the chosen index, -1 if cancelled
+// (q / Esc), or -2 if stdin is not a terminal (caller falls back to a typed
+// choice). Uses raw termios + ANSI; no dependency. `current` is marked with '*'.
+static int select_menu(const std::string &title, const std::vector<std::string> &items, int current) {
+    if (!isatty(STDIN_FILENO) || items.empty()) return -2;
+    struct termios old_t, raw;
+    tcgetattr(STDIN_FILENO, &old_t);
+    raw = old_t;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 1; raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+    int sel = (current >= 0 && current < (int)items.size()) ? current : 0;
+    auto render = [&](bool first) {
+        if (!first) printf("\033[%zuA", items.size() + 1); // back to the title line
+        printf("\r\033[J");                                // clear from here down
+        printf("%s  (up/down move, Enter picks, q cancels)\n", title.c_str());
+        for (size_t i = 0; i < items.size(); i++) {
+            const char *star = ((int)i == current) ? " *" : "";
+            if ((int)i == sel) printf("\033[7m> %s%s\033[0m\n", items[i].c_str(), star);
+            else               printf("  %s%s\n", items[i].c_str(), star);
+        }
+        fflush(stdout);
+    };
+    render(true);
+    int result = -1;
+    while (true) {
+        int c = getchar();
+        if (c == '\r' || c == '\n') { result = sel; break; }
+        if (c == 'q' || c == 3) { result = -1; break; }         // q or Ctrl-C
+        if (c == 27) {                                          // ESC: bare or arrow
+            int c1 = getchar();
+            if (c1 == '[') {
+                int c2 = getchar();
+                if (c2 == 'A') sel = (sel - 1 + (int)items.size()) % (int)items.size();
+                else if (c2 == 'B') sel = (sel + 1) % (int)items.size();
+            } else { result = -1; break; }
+        } else if (c == 'k') sel = (sel - 1 + (int)items.size()) % (int)items.size();
+        else if (c == 'j') sel = (sel + 1) % (int)items.size();
+        render(false);
+    }
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_t);
+    return result;
 }
 
 // ---- one generation, streamed --------------------------------------------
@@ -104,8 +151,17 @@ struct ChatState {
     std::string model_dir;   // where /model looks for *.rkllm
 };
 
-static void print_help() {
-    printf("Commands (anything else is sent to the model):\n"
+static void print_status(const KilnConfig &cfg, const ChatState &st) {
+    std::string sys = st.base_system;
+    if (sys.size() > 60) sys = sys.substr(0, 60) + "...";
+    printf("model: %s | history: %s | turns: %ld\n",
+           base_of(cfg.llm_model).c_str(), cfg.llm_keep_history ? "on" : "off", st.turns);
+    printf("system: %s\n", sys.empty() ? "(none)" : sys.c_str());
+}
+
+static void print_help(const KilnConfig &cfg, const ChatState &st) {
+    print_status(cfg, st);
+    printf("\nCommands (anything else is sent to the model):\n"
            "  /help            show this list\n"
            "  /clear           forget the conversation, keep the system prompt\n"
            "  /new             start a fresh session (clear + reset)\n"
@@ -125,7 +181,8 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
 
     if (cmd == "/exit" || cmd == "/quit") return false;
 
-    if (cmd == "/help") { print_help(); return true; }
+    if (cmd == "/help") { print_help(cfg, st); return true; }
+    if (cmd == "/status") { print_status(cfg, st); return true; }
 
     if (cmd == "/clear") {
         llm.clear_kv_cache(1);           // keep the system prompt in the KV
@@ -196,11 +253,20 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         std::vector<std::string> models = list_models(st.model_dir);
         if (arg.empty()) {
             if (models.empty()) { printf("no .rkllm models in %s\n", st.model_dir.c_str()); return true; }
-            printf("models in %s:\n", st.model_dir.c_str());
-            for (const auto &m : models)
-                printf("  %s%s\n", m.c_str(), (base_of(cfg.llm_model) == m) ? "  (current)" : "");
-            printf("switch with: /model <name>\n");
-            return true;
+            std::string cur = base_of(cfg.llm_model);
+            int curidx = -1;
+            for (size_t i = 0; i < models.size(); i++) if (models[i] == cur) curidx = (int)i;
+            int pick = select_menu("switch model in " + st.model_dir, models, curidx);
+            if (pick == -2) {  // not a terminal: fall back to a typed list
+                printf("models in %s:\n", st.model_dir.c_str());
+                for (const auto &m : models)
+                    printf("  %s%s\n", m.c_str(), (cur == m) ? "  (current)" : "");
+                printf("switch with: /model <name>\n");
+                return true;
+            }
+            if (pick < 0) { printf("[cancelled]\n"); return true; }
+            if (pick == curidx) { printf("[already using %s]\n", models[pick].c_str()); return true; }
+            arg = models[pick];  // fall through to the switch below
         }
         // resolve arg -> path (accept a bare name in model_dir or a full path)
         std::string path = (arg.find('/') != std::string::npos) ? arg : st.model_dir + "/" + arg;

@@ -13,15 +13,24 @@ before writing it to the file.
 
 | command | what it does |
 |---|---|
-| `/help` | list the commands |
+| `/help` | show current state, then list the commands |
+| `/status` | show current state only (model, history, turns, system prompt) |
 | `/clear` | forget the conversation; keep the system prompt |
 | `/new` | start a fresh session (clear + reset counters) |
 | `/history [on\|off]` | multi-turn memory on/off; no argument shows the current state |
 | `/system [text]` | show the system prompt, or set it (resets the session) |
 | `/context` | show the context window and session counters |
 | `/compact` | summarize the conversation to free up context |
-| `/model [name]` | list `.rkllm` models, or switch to one |
+| `/model [name]` | switch model; with no name, pick from a list with the arrow keys |
 | `/exit`, `/quit` | leave |
+
+`/help` and `/status` print the live state first, e.g. `model: qwen... | history: on
+| turns: 3`, so you can see where the session stands at a glance.
+
+`/model` with no argument opens an arrow-key picker (up/down to move, Enter to
+switch, `q` to cancel); the current model is marked. Give a name (`/model foo.rkllm`)
+to switch without the menu. When stdin is not a terminal it falls back to a plain
+list you switch by name.
 
 ## How each is backed
 

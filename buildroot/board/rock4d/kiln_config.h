@@ -22,7 +22,7 @@ struct KilnConfig {
     std::string llm_model            = "/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm";
     int         llm_max_context_len  = 2048;
     int         llm_max_new_tokens   = 512;
-    int         llm_top_k            = 1;
+    int         llm_top_k            = 40;   // >1 avoids greedy-decode degeneration (repeated junk tokens)
     float       llm_top_p            = 0.95f;
     float       llm_temperature      = 0.8f;
     float       llm_repeat_penalty   = 1.1f;
