@@ -18,9 +18,9 @@ only for applying the NPU *device node* to a kernel that already has the code
 fixes, e.g. an Armbian kernel rebuilt with `kernel-patches/` in `userpatches/`.)
 
 > **Status:** verified end-to-end on **mainline `linux-7.1.3`** (ROCK 4D,
-> RK3576): `kiln-chat` holds a multi-turn Qwen2.5-1.5B conversation at ~9 tok/s
-> and `kiln-vision` classifies at ~169 fps, both on the NPU. The one-shot script
-> automates the same steps on an Armbian userland.
+> RK3576): `kiln-chat` holds a multi-turn conversation (Qwen2.5-1.5B ~9 tok/s or
+> Llama-3.2-1B ~13 tok/s, live `/model` switch) and `kiln-vision` classifies at
+> ~169 fps, both on the NPU. The one-shot script automates it on an Armbian userland.
 
 ## What gets installed
 
