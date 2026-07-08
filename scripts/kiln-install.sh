@@ -150,9 +150,25 @@ $SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-c
 	|| die "apt failed installing prerequisites."
 
 # --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
-# on_patched_kernel is true once we're running the Kiln kernel. KILN_FORCE_KERNEL=1
-# forces a re-install even then (e.g. a rebuilt same-version deb with a config fix).
-on_patched_kernel(){ [ -z "${KILN_FORCE_KERNEL:-}" ] && [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/null)" ]; }
+# The deb version (e.g. 20260708.13) the '$KTAG' release currently offers; empty
+# if offline. Two CI builds share the same 'uname -r' (7.1.3), so the deb VERSION
+# -- not the release string -- is what tells a new kernel (e.g. with 0010) from an
+# old one; the marker records it so a newer published build re-installs by itself.
+kernel_release_ver(){
+	curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" 2>/dev/null \
+		| grep -o 'linux-image-[^"]*\.deb' | grep -v -- '-dbg' | head -1 | awk -F_ '{print $2}'
+}
+# True once we're running the Kiln kernel AND it is the version the release now
+# offers. KILN_FORCE_KERNEL=1 forces a re-install regardless. Offline (can't check
+# the release) keeps the running kernel -- safe fallback, never blocks.
+on_patched_kernel(){
+	[ -n "${KILN_FORCE_KERNEL:-}" ] && return 1
+	[ -f "$MARKER" ] || return 1
+	[ "$KREL" = "$(sed -n 1p "$MARKER" 2>/dev/null)" ] || return 1
+	local want; want="$(kernel_release_ver)"
+	[ -z "$want" ] && return 0
+	[ "$(sed -n 2p "$MARKER" 2>/dev/null)" = "$want" ]
+}
 
 if ! on_patched_kernel; then
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
@@ -178,7 +194,10 @@ if ! on_patched_kernel; then
 	$SUDO dpkg -i "$TMP"/linux-image-*.deb || die "installing the kernel failed (see dpkg errors above)."
 	wire_boot "$KREL_NEW"     # point Armbian's u-boot at the mainline kernel + dtb
 	$SUDO apt-mark hold "linux-image-$KREL_NEW" "linux-headers-$KREL_NEW" >/dev/null 2>&1 || true
-	$SUDO mkdir -p /etc/kiln; echo "$KREL_NEW" | $SUDO tee "$MARKER" >/dev/null
+	# marker: line 1 = kernel release (uname -r), line 2 = deb version, so a later
+	# run can tell a newer published build from the one already installed.
+	DEBVER="$(basename "$IMG" | awk -F_ '{print $2}')"
+	$SUDO mkdir -p /etc/kiln; printf '%s\n%s\n' "$KREL_NEW" "$DEBVER" | $SUDO tee "$MARKER" >/dev/null
 	cat <<EOF
 
 [kiln] Mainline NPU kernel $KREL_NEW installed. REBOOT into it, then run this
