@@ -323,7 +323,7 @@ top_k = 1
 top_p = 0.8
 repeat_penalty = 1.3
 keep_history = 1
-system_prompt = You are Qwen, created by Alibaba Cloud. You are a helpful assistant. Always reply in the same language the user writes in.
+system_prompt =
 
 [vision]
 model = /opt/models/$MODEL_RKNN

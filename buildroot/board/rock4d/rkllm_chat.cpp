@@ -188,7 +188,7 @@ static void print_help(const KilnConfig &cfg, const ChatState &st) {
            "  /clear           forget the conversation, keep the system prompt\n"
            "  /new             start a fresh session (clear + reset)\n"
            "  /history [on|off] multi-turn memory on/off (no arg: show)\n"
-           "  /system [text]   show or set the system prompt (resets the session)\n"
+           "  /system [text|clear] show/set/clear the system prompt (resets the session)\n"
            "  /context         show the context window and what is in use\n"
            "  /model [name]    list models, or switch to one (reloads, takes a few s)\n"
            "  /exit, /quit     leave\n");
@@ -238,12 +238,18 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
     }
 
     if (cmd == "/system") {
-        if (arg.empty()) { printf("system prompt: %s\n", st.base_system.c_str()); return true; }
+        if (arg.empty()) {
+            printf("system prompt: %s\n", st.base_system.empty() ? "(none)" : st.base_system.c_str());
+            printf("(set with '/system <text>', clear with '/system clear')\n");
+            return true;
+        }
+        if (arg == "clear" || arg == "none") arg.clear();
         st.base_system = arg;
         cfg.llm_system_prompt = arg;
         llm.set_system_prompt(arg);
         st.turns = 0; st.gen_tokens = 0;
-        printf("[system prompt set; session reset]\n");
+        printf(arg.empty() ? "[system prompt cleared; session reset]\n"
+                           : "[system prompt set; session reset]\n");
         persist(cfg);
         return true;
     }

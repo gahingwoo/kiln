@@ -205,11 +205,12 @@ private:
         for (char &c : lower) c = (char)tolower((unsigned char)c);
         std::string system, prefix, postfix;
         if (lower.find("llama") != std::string::npos) {           // Llama-3 format
-            system  = "<|start_header_id|>system<|end_header_id|>\n\n" + sys + "<|eot_id|>";
+            system  = sys.empty() ? "" :
+                      "<|start_header_id|>system<|end_header_id|>\n\n" + sys + "<|eot_id|>";
             prefix  = "<|start_header_id|>user<|end_header_id|>\n\n";
             postfix = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
         } else {                                                  // Qwen / default ChatML
-            system  = "<|im_start|>system\n" + sys + "<|im_end|>\n";
+            system  = sys.empty() ? "" : "<|im_start|>system\n" + sys + "<|im_end|>\n";
             prefix  = "<|im_start|>user\n";
             postfix = "<|im_end|>\n<|im_start|>assistant\n";
         }

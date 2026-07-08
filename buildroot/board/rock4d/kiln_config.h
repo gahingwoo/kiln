@@ -32,10 +32,10 @@ struct KilnConfig {
     int         llm_embed_flash      = 1;    // query word-embeddings from flash
     int         llm_keep_history     = 1;    // 1 = multi-turn KV retained (default), 0 = single-turn
     int         llm_n_keep           = -1;   // KV tokens kept on context shift; -1 = runtime default
-    // single-line system-prompt CONTENT; kiln_llm wraps it in the ChatML markers.
-    std::string llm_system_prompt    =
-        "You are Qwen, created by Alibaba Cloud. You are a helpful assistant. "
-        "Always reply in the same language the user writes in.";
+    // system-prompt CONTENT (single line); kiln_llm wraps it in the model's chat
+    // markers. Empty by default -- no system prompt, so the model behaves as-is
+    // (model-neutral; set one live with /system, or here).
+    std::string llm_system_prompt    = "";
 
     // [vision] -- librknnrt
     std::string vision_model   = "/opt/models/mobilenetv2-12_rk3576.rknn";
