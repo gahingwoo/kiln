@@ -27,7 +27,16 @@ struct KilnRunCtx {
     long ntok = 0;
     std::function<void()> request_abort;             // set by run(); stops generation
     bool stopped = false;                            // a stop token was seen
+    char last_ch = '\n';                             // last char emitted (for stop sequences)
 };
+
+// The small model often fails to end its turn and instead role-plays a fresh
+// one -- e.g. "...requirements?\n\nAssistant: No problem ...". A role label at the
+// start of a line is that drift, so we treat it as an end-of-turn stop sequence.
+static inline bool kiln_is_role_label(const std::string &s) {
+    return s == "Assistant" || s == "User" || s == "Human" || s == "System" ||
+           s == "assistant" || s == "user" || s == "human" || s == "system";
+}
 
 // Qwen2.5 ChatML turn/END token IDs: <|endoftext|>=151643, <|im_end|>=151645.
 // ROOT CAUSE of "never stops": this RKLLM build does NOT flag Qwen's added
@@ -70,8 +79,22 @@ static void kiln_llm_callback(RKLLMResult *result, void *userdata, LLMCallState 
             if (ctx->on_finish) ctx->on_finish(false);
             return;
         }
+        // Stop sequence: a role label at the start of a line = the model drifting
+        // into a fake next turn. Trim it (do not emit) and end the turn.
+        {
+            size_t a = t.find_first_not_of(" \t");
+            size_t b = t.find_last_not_of(" \t\r\n");
+            std::string core = (a == std::string::npos) ? "" : t.substr(a, b - a + 1);
+            if (ctx->last_ch == '\n' && kiln_is_role_label(core)) {
+                ctx->stopped = true;
+                if (ctx->request_abort) ctx->request_abort();
+                if (ctx->on_finish) ctx->on_finish(false);
+                return;
+            }
+        }
         ctx->ntok++;
         if (ctx->on_token) ctx->on_token(t.c_str());
+        if (!t.empty()) ctx->last_ch = t[t.size() - 1];
     } else if (state == RKLLM_RUN_FINISH) {
         if (ctx && !ctx->stopped && ctx->on_finish) ctx->on_finish(false);
     } else if (state == RKLLM_RUN_ERROR) {
