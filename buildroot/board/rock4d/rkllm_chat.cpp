@@ -25,6 +25,28 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#ifdef KILN_USE_READLINE
+#include <readline/readline.h>
+#include <readline/history.h>
+#endif
+
+// Read one input line. With readline you get cursor editing (backspace, left/
+// right, Home/End), up/down history recall, and correct UTF-8 -- so Chinese input
+// edits properly. Without it (no libreadline at build) it falls back to a plain
+// line read. Returns false on EOF (Ctrl-D).
+static bool read_input(const char *prompt, std::string &out) {
+#ifdef KILN_USE_READLINE
+    char *line = readline(prompt);
+    if (!line) return false;
+    out = line;
+    if (line[0]) add_history(line);
+    free(line);
+    return true;
+#else
+    fputs(prompt, stdout); fflush(stdout);
+    return (bool)std::getline(std::cin, out);
+#endif
+}
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -172,6 +194,14 @@ static void print_help(const KilnConfig &cfg, const ChatState &st) {
            "  /exit, /quit     leave\n");
 }
 
+// Write the current config so a change (model, system prompt, history) survives
+// a restart -- otherwise /model etc. would only apply to the running session.
+static void persist(const KilnConfig &cfg) {
+    if (kiln::save(cfg)) printf("[saved to %s]\n", kiln::config_path().c_str());
+    else printf("[note: could not write %s; change applies to this session only]\n",
+                kiln::config_path().c_str());
+}
+
 // Returns true to keep looping, false to quit.
 static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cfg, ChatState &st) {
     std::istringstream iss(line);
@@ -200,9 +230,9 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
     if (cmd == "/history") {
         if (arg.empty()) {
             printf("history: %s\n", cfg.llm_keep_history ? "on (multi-turn)" : "off (single-turn)");
-        } else if (arg == "on")  { cfg.llm_keep_history = 1; printf("[history on -- the model now remembers the conversation]\n"); }
+        } else if (arg == "on")  { cfg.llm_keep_history = 1; printf("[history on -- the model now remembers the conversation]\n"); persist(cfg); }
         else if (arg == "off") { cfg.llm_keep_history = 0; llm.clear_kv_cache(1); st.turns = 0; st.gen_tokens = 0;
-                                   printf("[history off -- each turn is independent]\n"); }
+                                   printf("[history off -- each turn is independent]\n"); persist(cfg); }
         else printf("usage: /history [on|off]\n");
         return true;
     }
@@ -214,6 +244,7 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         llm.set_system_prompt(arg);
         st.turns = 0; st.gen_tokens = 0;
         printf("[system prompt set; session reset]\n");
+        persist(cfg);
         return true;
     }
 
@@ -264,6 +295,7 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
         st.turns = 0; st.gen_tokens = 0;
         st.model_dir = dir_of(cfg.llm_model);
         printf("[loaded %s]\n", base_of(cfg.llm_model).c_str());
+        persist(cfg);
         return true;
     }
 
@@ -303,8 +335,8 @@ int main(int argc, char **argv) {
 
     while (true) {
         std::string input;
-        printf("\nuser: ");
-        if (!std::getline(std::cin, input)) break;
+        printf("\n");
+        if (!read_input("user: ", input)) break;   // Ctrl-D / EOF
         input = trim(input);
         if (input.empty()) continue;
 

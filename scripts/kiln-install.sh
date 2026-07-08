@@ -147,6 +147,7 @@ fi
 say "installing prerequisites ..."
 $SUDO apt-get update -qq || true
 $SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
+	libreadline-dev \
 	|| die "apt failed installing prerequisites."
 
 # --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
@@ -258,7 +259,10 @@ done
 [ -f "$DL/libgomp.so.1" ] || say "note: libgomp.so.1 not staged; librkllmrt will use the system one if present"
 
 if [ -f "$DL/rkllm.h" ]; then
-	g++ -include cstdint buildroot/board/rock4d/rkllm_chat.cpp -I "$DL" -L "$DL" \
+	# line editing + history in kiln-chat needs readline; use it if the header is
+	# present, otherwise fall back to a plain line read (no cursor/history).
+	RL=""; printf '#include <readline/readline.h>\n' | g++ -E - >/dev/null 2>&1 && RL="-DKILN_USE_READLINE -lreadline"
+	g++ -include cstdint $RL buildroot/board/rock4d/rkllm_chat.cpp -I "$DL" -L "$DL" \
 		-Wl,-rpath-link,"$DL" -lrkllmrt -lpthread -o /tmp/rkllm_demo \
 	  && $SUDO install -m0755 /tmp/rkllm_demo /usr/bin/rkllm_demo || say "WARN: rkllm_demo build failed"
 fi
