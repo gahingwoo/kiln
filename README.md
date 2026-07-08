@@ -22,9 +22,10 @@ control experiment that proved the driver fix generalises.)
 
 **It works.** On real hardware (ROCK 4D, RK3576) on a mainline kernel, **both**
 the RKLLM LLM stack and the RKNN vision stack run on the NPU: `kiln-chat` holds a
-multi-turn Qwen2.5-1.5B conversation and `kiln-vision` classifies images, on a
-**pure mainline `linux-7.1.3`** kernel built by CI with Kiln's patch set
-(`kernel-patches/` 0001–0006) — not just the earlier hand-built `linux-next` image.
+multi-turn Qwen2.5-1.5B conversation (9.3 tok/s) and `kiln-vision` classifies
+images (~169 fps), on a **pure mainline `linux-7.1.3`** kernel built by CI with
+Kiln's patch set (`kernel-patches/` 0001–0010) — not just the earlier hand-built
+`linux-next` image.
 
 Verified end-to-end (first on a hand-built `linux-next` 7.1 image, then on the
 pure-mainline 7.1.3 CI kernel):
@@ -51,17 +52,21 @@ TLB per job. Full write-up in [`driver/patches/README.md`](driver/patches/README
 
 Bring-up caveats (honest):
 
-- The RK3576 NPU power domain needs a **kernel** fix, not just the module: a
-  a *cold* NPU power-on yields a working core, but the mainline runtime-PM
-  autosuspend powers the domain off between jobs — and a *warm* re-power comes
-  back `on` with a **dead core** (register reads SError), while the autosuspend
-  itself races the shared PMU/regulator path and times out CPU DVFS
-  (`_set_opp_voltage … -110`), wedging the board. Kiln keeps the NPU **resident**
-  the proven way — a sysfs `power/control=on` applied by a udev rule when rknpu
-  binds (`/usr/bin/kiln-npu-keepon`), so it stays in the working cold-armed state
-  and never autosuspends — plus a driver bail-on-power-on-failure shim. The
-  buildroot linux-next 7.1 kernel runs the full stack (9.3 tok/s); the same
-  keep-resident fix carries it on the 7.1.3 build.
+- The RK3576 NPU needs **kernel** fixes, not just the module. A *cold* NPU
+  power-on needs a settle delay, a BIU reset pulse, the full domain clock set and
+  a core "arm" (`kernel-patches/` 0001/0002/0005/0009) or the first NPU register
+  read SErrors. The subtler one: the ROCK 4D board DTS marks the NPU rail
+  `vdd_npu_s0` only `regulator-boot-on`, so ~30 s after boot the regulator core
+  disables it once the driver's probe balances its refs — while the genpd domain
+  still reports "on". The **second** NPU inference then reads a register on a
+  dead rail and the MMIO read wedges the CPU (RCU stall). So the first chat turn
+  works and the second hangs the board. The fix is one line —
+  `regulator-always-on` on `vdd_npu_s0` (`kernel-patches/0010`), exactly what the
+  vendor BSP and the buildroot linux-next kernel carry. With it, ROCK 4D holds a
+  multi-turn Qwen2.5-1.5B chat at **9.3 tok/s on pure mainline 7.1.3**. (The
+  "keep the NPU resident via a sysfs `power/control=on` udev rule" idea explored
+  during bring-up was a dead end — the driver already keeps the NPU warm 10 min
+  between jobs; the rail-always-on is the real fix.)
 - The orphan MMU's TLB is flushed per-job rather than tracked by the iommu core —
   fine for inference, not a general-purpose iommu fix.
 - The **Armbian** path (DKMS + DT overlay, see [`ARMBIAN.md`](ARMBIAN.md)) is

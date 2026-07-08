@@ -60,10 +60,10 @@ jobs:
           curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${KVER}.tar.xz" | tar xJ
           echo "KDIR=$PWD/linux-${KVER}" >> "$GITHUB_ENV"
 
-      - name: Apply Kiln kernel patches (0001..0009)
+      - name: Apply Kiln kernel patches (0001..0010)
         run: |
           cd "$KDIR"
-          for p in 0001 0002 0003 0004 0005 0006 0007 0008 0009; do
+          for p in 0001 0002 0003 0004 0005 0006 0007 0008 0009 0010; do
             f="$(ls "$GITHUB_WORKSPACE"/kernel-patches/${p}-*.patch)"
             echo "applying $(basename "$f")"; patch -p1 < "$f"
           done
@@ -128,7 +128,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=kiln-mainline-kernel
-          NOTES="Pure mainline linux-${KVER} for Radxa ROCK 4D (RK3576) + Kiln NPU patches (0001 settle-delay, 0003 iommu clocks, 0004 vendor rknpu DT node). bindeb-pkg. Install per MAINLINE-KERNEL.md / kiln-install.sh."
+          NOTES="Pure mainline linux-${KVER} for Radxa ROCK 4D (RK3576) + Kiln NPU patches 0001-0010 (pmdomain cold-start arm + settle/BIU, iommu clocks/stall, vendor rknpu DT node, and 0010 vdd_npu_s0 always-on -- the fix that makes repeat inference work; 9.3 tok/s). bindeb-pkg. Install per MAINLINE-KERNEL.md / kiln-install.sh."
           if gh release view "$TAG" >/dev/null 2>&1; then
             # clear stale assets first so the installer never picks an old build
             gh release view "$TAG" --json assets --jq '.assets[].name' \

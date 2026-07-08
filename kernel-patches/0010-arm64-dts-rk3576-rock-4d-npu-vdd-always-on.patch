@@ -1,0 +1,45 @@
+From c0ffee0000000000000000000000000000010aa Mon Sep 17 00:00:00 2001
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Tue, 8 Jul 2026 17:30:00 +1200
+Subject: [PATCH] arm64: dts: rk3576-rock-4d: keep the NPU rail (vdd_npu_s0) on
+
+The ROCK 4D board DTS marks the NPU supply vdd_npu_s0 (dcdc-reg2 on the
+RK806) only `regulator-boot-on`, not `regulator-always-on`. The vendor rknpu
+driver enables the rail on the first NPU power-on and disables it again on
+power-off, so once probe balances its enable/disable the regulator core's
+boot-time cleanup (regulator_init_complete, ~30 s after boot) sees no active
+consumer and disables the rail: "vdd_npu_s0: disabling".
+
+The genpd NPU power domain, however, still reports "on" (the PMU status bit is
+decoupled from the PMIC rail). So the *next* NPU use hits the early-return in
+rockchip_pd_power() -- `if (rockchip_pmu_domain_is_on(pd) == power_on) return 0`
+-- and neither re-enables the domain clocks nor re-runs the power-on setup,
+while the rail itself is dead. The driver then reads an NPU MMU bank register
+on an unpowered core; the MMIO read never completes and wedges the CPU (RCU
+stall, broadcast timer dead). Result: the first NPU inference after boot works
+(cold rail still up) but the second hangs the board.
+
+The vendor BSP / the buildroot linux-next kernel that runs this stack at
+9.3 tok/s carry `regulator-always-on` on vdd_npu_s0; stock mainline does not.
+Add it so the NPU rail stays up and every NPU power-on lands on a live core.
+This is the actual fix for the "second inference wedges the board" symptom
+(pmdomain patches 0001/0002/0006/0009 make the *cold* power-on correct; this
+is what makes re-use correct).
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+ arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts b/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts
+index aaaaaaaaaaaaa..bbbbbbbbbbbbb 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts
+@@ -438,6 +438,7 @@
+ 			};
+
+ 			vdd_npu_s0: dcdc-reg2 {
++				regulator-always-on;
+ 				regulator-boot-on;
+ 				regulator-enable-ramp-delay = <400>;
+ 				regulator-min-microvolt = <550000>;
