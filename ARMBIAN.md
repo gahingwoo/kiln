@@ -17,7 +17,7 @@ into that kernel's DTB, so **no overlay is needed** on this path. (The standalon
 only for applying the NPU *device node* to a kernel that already has the code
 fixes, e.g. an Armbian kernel rebuilt with `kernel-patches/` in `userpatches/`.)
 
-> **Status:** verified end-to-end on **pure mainline `linux-7.1.3`** (ROCK 4D,
+> **Status:** verified end-to-end on **mainline `linux-7.1.3`** (ROCK 4D,
 > RK3576): `kiln-chat` holds a multi-turn Qwen2.5-1.5B conversation at ~9 tok/s
 > and `kiln-vision` classifies at ~169 fps, both on the NPU. The one-shot script
 > automates the same steps on an Armbian userland.

@@ -25,7 +25,7 @@ on:
         description: "Attach the .deb to a GitHub release"
         type: boolean
         default: true
-  # NOTE: manual (workflow_dispatch) only. Kiln ships the PURE-MAINLINE kernel
+  # NOTE: manual (workflow_dispatch) only. Kiln ships the mainline kernel
   # (mainline-npu-kernel.yml); this Armbian build is kept only to (re)generate the
   # boot-tested ROCK 4D .config that the mainline build reuses from the
   # 'armbian-npu-kernel-edge' release. It used to also run on every push to
@@ -100,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="armbian-npu-kernel-${{ github.event.inputs.branch || 'edge' }}"
-          NOTES="Patched Armbian ${{ github.event.inputs.branch || 'edge' }} kernel for Radxa ROCK 4D (RK3576) with the Kiln NPU pm-domain fix (kernel-patches/0001). Install on the board: sudo dpkg -i linux-image-*.deb linux-dtb-*.deb linux-headers-*.deb; then re-enable the NPU overlay + module and reboot (see ARMBIAN-KERNEL.md)."
+          NOTES="Patched Armbian ${{ github.event.inputs.branch || 'edge' }} kernel for Radxa ROCK 4D (RK3576) with the Kiln NPU kernel patches. NOTE: this workflow exists mainly to publish the ROCK 4D .config that the mainline-npu-kernel build reuses as a base; the supported install path is the Kiln mainline kernel via scripts/kiln-install.sh (see MAINLINE-KERNEL.md / ARMBIAN.md)."
           gh release view "$TAG" >/dev/null 2>&1 \
             && gh release upload "$TAG" debs/*.deb --clobber \
             || gh release create "$TAG" debs/*.deb --title "Kiln NPU kernel ($TAG)" --notes "$NOTES"

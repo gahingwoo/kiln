@@ -32,10 +32,10 @@ cannot be shipped as a module.
 
 | `0009-pmdomain-rockchip-arm-the-rk3576-npu-core-on-power-on.patch` | `pmdomain/rockchip` | **The cold-start arm.** On mainline the NPU core register block (`base+0x0`) is unreadable from a later ioctl -- vendor rknpu `GET_HW_VERSION` async-SErrors / hangs the board -- unless it is touched *during* the power-domain power-on, right after the BIU reset. The vendor BSP / the working buildroot linux-next kernel do exactly this; mainline never does, so the core comes up "on" but dead. Read `base+0x0` + cycle the MMU bank DTE regs in `rockchip_pd_power()` (npu0). Confirmed still needed: with 0010 in place the boot arm reads a valid NPU version (`0x46495245`, "FIRE") — a live core — where without it the core comes up dead. | **yes** |
 
-| `0010-arm64-dts-rk3576-rock-4d-npu-vdd-always-on.patch` | `arm64: dts` | **The actual "second inference wedges the board" fix.** The board DTS marks the NPU rail `vdd_npu_s0` only `regulator-boot-on`, so the regulator core's boot-time cleanup (~30 s) disables it once the driver's probe balances its enable/disable. The genpd domain still reports "on" (PMU status is decoupled from the PMIC rail), so the next NPU use early-returns in `rockchip_pd_power()` without re-powering, and the driver reads an MMU register on a dead rail → the MMIO read never returns → CPU wedge / RCU stall. **The first inference after boot works, the second hangs.** The vendor BSP and the buildroot linux-next kernel (9.3 tok/s) mark this rail `regulator-always-on`; stock mainline does not. Add it so the rail stays up. **Verified on real hardware: with this line, ROCK 4D holds a multi-turn Qwen2.5-1.5B chat at 9.3 tok/s on pure mainline 7.1.3.** | **yes — the one that makes re-use work** |
+| `0010-arm64-dts-rk3576-rock-4d-npu-vdd-always-on.patch` | `arm64: dts` | **The actual "second inference wedges the board" fix.** The board DTS marks the NPU rail `vdd_npu_s0` only `regulator-boot-on`, so the regulator core's boot-time cleanup (~30 s) disables it once the driver's probe balances its enable/disable. The genpd domain still reports "on" (PMU status is decoupled from the PMIC rail), so the next NPU use early-returns in `rockchip_pd_power()` without re-powering, and the driver reads an MMU register on a dead rail → the MMIO read never returns → CPU wedge / RCU stall. **The first inference after boot works, the second hangs.** The vendor BSP and the buildroot linux-next kernel (9.3 tok/s) mark this rail `regulator-always-on`; stock mainline does not. Add it so the rail stays up. **Verified on real hardware: with this line, ROCK 4D holds a multi-turn Qwen2.5-1.5B chat at 9.3 tok/s on mainline 7.1.3.** | **yes — the one that makes re-use work** |
 
 For a **mainline** build apply **0001 … 0010** (the CI does). The split of labour,
-now that the stack is verified end-to-end at 9.3 tok/s on pure mainline 7.1.3:
+now that the stack is verified end-to-end at 9.3 tok/s on mainline 7.1.3:
 
 - **0001 + 0002 + 0005 + 0009** make the **cold** NPU power-on correct: settle
   delay, BIU reset pulse, full domain clocks, and the core "arm" (touch
@@ -95,6 +95,6 @@ runs the NPU with no rebuild.
 ## Applying
 
 The mainline kernel build (see `../MAINLINE-KERNEL.md`) applies these with
-`patch -p1` (or `git am`) on a `linux-7.1.3` tree; the Armbian build
-(`../ARMBIAN-KERNEL.md`) drops 0001 into the framework's `userpatches/`. They are
-ordinary `git format-patch` output.
+`patch -p1` (or `git am`) on a `linux-7.1.3` tree — the CI does, and
+`scripts/kiln-install.sh` installs the resulting `.deb`. They are ordinary
+`git format-patch` output.

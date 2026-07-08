@@ -1,6 +1,6 @@
 name: mainline-npu-kernel-rk3568
 
-# Build a PURE mainline linux-7.1.3 kernel for the Radxa ROCK 3B (RK3568) with
+# Build a mainline linux-7.1.3 kernel for the Radxa ROCK 3B (RK3568) with
 # Kiln's RK3568 NPU patches (kernel-patches-rk3568/0001..0003) -- vendor rknpu
 # NPU node + IOMMU v2 GFP_DMA32 fix. Built natively on a free arm64 GH runner;
 # published as bindeb-pkg .debs. Companion to mainline-npu-kernel.yml (RK3576).
@@ -112,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=kiln-mainline-kernel-rk3568
-          NOTES="Pure mainline linux-${KVER} for Radxa ROCK 3B (RK3568) + Kiln RK3568 NPU patches (NPU DT node, RK3568_PD_NPU, IOMMU v2 GFP_DMA32 fix). bindeb-pkg. UNTESTED on hardware -- pending ROCK 3B validation. Install per RK3568.md / kiln-install.sh."
+          NOTES="mainline linux-${KVER} for Radxa ROCK 3B (RK3568) + Kiln RK3568 NPU patches (NPU DT node, RK3568_PD_NPU, IOMMU v2 GFP_DMA32 fix). bindeb-pkg. UNTESTED on hardware -- pending ROCK 3B validation. Install per RK3568.md / kiln-install.sh."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release view "$TAG" --json assets --jq '.assets[].name' \
               | xargs -r -I{} gh release delete-asset "$TAG" {} -y || true

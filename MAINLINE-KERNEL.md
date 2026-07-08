@@ -1,4 +1,4 @@
-# Running the Kiln NPU on a pure mainline kernel
+# Running the Kiln NPU on a mainline kernel
 
 This is Kiln's primary path: a **stock mainline `linux-7.1.3`** kernel plus a
 small, self-contained patch set — no Armbian kernel patches, no DT overlay.
@@ -8,9 +8,9 @@ small, self-contained patch set — no Armbian kernel patches, no DT overlay.
 The Armbian edge kernel carries ~170 downstream patches and tangles the NPU with
 its own packaging (its aic8800 DKMS wifi module fails on 7.1 and blocks the whole
 kernel install). Mainline is cleaner and the story is honest: **vendor `rknpu`
-stack on pure mainline + one pm-domain patch + one DT patch.** Mainline 7.1.3
-already has full RK3576 + ROCK 4D support (`rk3576-rock-4d.dts` is upstream), so
-this is viable.
+stack on a clean mainline base + a focused NPU patch set (`kernel-patches/`
+0001–0010).** Mainline 7.1.3 already has full RK3576 + ROCK 4D support
+(`rk3576-rock-4d.dts` is upstream), so this is viable.
 
 ## The patch set (all in `kernel-patches/`, verified against 7.1.3)
 
@@ -32,7 +32,7 @@ and the kernel config leaves `CONFIG_DRM_ACCEL_ROCKET` off.
 1. fetch `linux-7.1.3` from kernel.org
 2. `patch -p1` 0001 + 0003 + 0004
 3. config: a ROCK 4D-capable base (the Armbian 7.1.3 `.config` is a good, boot-tested
-   starting point — code is pure mainline, the config just selects drivers) with
+   starting point — code is mainline, the config just selects drivers) with
    `CONFIG_DRM_ACCEL_ROCKET=n`
 4. `make bindeb-pkg` → `linux-image-<ver>` + `linux-headers-<ver>` `.deb`
 5. publish to the `kiln-mainline-kernel` release

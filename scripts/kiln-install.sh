@@ -6,7 +6,7 @@
 # Runs on Armbian userspace with a Kiln MAINLINE kernel. Two phases (it tells you
 # when to reboot between them):
 #
-#   PHASE 1 — installs the Kiln mainline 7.1.3 kernel (pure mainline + a small
+#   PHASE 1 — installs the Kiln mainline 7.1.3 kernel (mainline + a small
 #     pm-domain settle-delay fix that must be COMPILED INTO the kernel; the
 #     out-of-tree module can't supply it, and a stock kernel SError-freezes the
 #     NPU on the first inference). Prebuilt by CI, published as a release; the NPU
