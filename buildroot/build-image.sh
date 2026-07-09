@@ -13,9 +13,15 @@ set -euo pipefail
 
 # ---- paths you must set -----------------------------------------------------
 BR_SRC="${BR_SRC:-/home/parallels/Desktop/linux-rk3576-npu/buildroot/br-src}"        # buildroot source
-KERNEL_SRC="${KERNEL_SRC:-/home/parallels/Desktop/kiln-713/linux-7.1.3}"             # mainline 7.1.3 + kernel-patches/ 0001-0010
+# DUAL image: mainline 7.1.3 + vendor kernel-patches 0001-0010 + the open rocket
+# RK3576 series (accel/rocket rknn_core). Both NPU drivers coexist; the two DTB
+# variants (rk3576-rock-4d{,-rocket}) pick which one binds npu@27700000 at boot.
+KERNEL_SRC="${KERNEL_SRC:-$(cd "$(dirname "$0")/.." && pwd)/kernel-dual/linux-7.1.3}"
 BASE_CONFIG="${BASE_CONFIG:-/home/parallels/Desktop/linux-rk3576-npu/kernel/base.config}"  # kernel .config base
 ROCKCHIP_BINARIES="${ROCKCHIP_BINARIES:-/home/parallels/Desktop/rock4d_package/binaries}"   # rock4d u-boot dir
+# rocket-mode userspace assets (replay_rocket + captured payload + libteflon)
+KILN_ROCKET_ASSETS="${KILN_ROCKET_ASSETS:-/home/parallels/Desktop/linux-rk3576-npu/rootfs-overlay}"
+export KILN_ROCKET_ASSETS
 # -----------------------------------------------------------------------------
 
 KILN="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,7 +59,7 @@ if [ -n "${KILN_REFETCH:-}" ] || [ ! -f "$KILN/driver/rknpu/rknpu_drv.c" ]; then
 	"$KILN/driver/fetch-vendor-driver.sh"
 fi
 
-# 4. point buildroot's kernel at the patched linux-next tree (rsync'd, read-only safe)
+# 4. point buildroot's kernel at the patched mainline 7.1.3 tree (read-only safe)
 cat > "$OUT/local.mk" <<EOF
 LINUX_OVERRIDE_SRCDIR = $KERNEL_SRC
 EOF

@@ -70,6 +70,42 @@ build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin
 # librknnrt.so alongside librkllmrt.so for the vision demo
 [ -f "$DL/librknnrt.so" ] && install -D -m0644 "$DL/librknnrt.so" "$TARGET_DIR/usr/lib/librknnrt.so"
 
+# --- 2c. bake the driver-environment probe (needs the ftrace kernel above) ---
+# capture/env-trace.sh = the vendor-vs-rocket same-kernel environment diff; POSIX
+# sh so it runs on the busybox image. Installed as /usr/bin/kiln-env-trace.
+[ -f "$KILN/capture/env-trace.sh" ] \
+	&& install -D -m0755 "$KILN/capture/env-trace.sh" "$TARGET_DIR/usr/bin/kiln-env-trace" \
+	&& echo "[kiln] installed kiln-env-trace -> /usr/bin/"
+
+# --- 2d. dual-image ROCKET-mode userspace ----------------------------------
+# The same image boots either the vendor rknpu (kiln DTB) or the open rocket
+# driver (rocket DTB). For rocket mode, ship a LIGHT NPU-submit workload:
+# replay_rocket (libc-only C binary) replays a captured task_number=N conv job
+# through /dev/accel/accel0 -- it exercises the rocket driver's power/clk/iommu/
+# submit path (what env-trace measures) with no Python/tflite stack. libteflon.so
+# is shipped too for the full mesa-teflon path if wanted.
+RA="${KILN_ROCKET_ASSETS:-}"
+if [ -n "$RA" ] && [ -x "$RA/opt/npu-test/replay_rocket" ]; then
+	install -D -m0755 "$RA/opt/npu-test/replay_rocket" "$TARGET_DIR/opt/rocket/replay_rocket"
+	mkdir -p "$TARGET_DIR/opt/rocket/replay_payload"
+	install -m0644 "$RA/opt/npu-test/rknpu_replay/"* "$TARGET_DIR/opt/rocket/replay_payload/"
+	[ -f "$RA/usr/lib/libteflon.so" ] && install -D -m0644 "$RA/usr/lib/libteflon.so" "$TARGET_DIR/usr/lib/libteflon.so"
+	# wrapper: load rocket, replay the captured job (the rocket-mode NPU workload)
+	install -D -m0755 /dev/stdin "$TARGET_DIR/usr/bin/kiln-rocket-run" <<'ROCKET'
+#!/bin/sh
+# Rocket-mode NPU workload: replay a captured task_number=N conv job through the
+# open accel/rocket driver. Use as the env-trace workload:
+#   kiln-env-trace rocket -- kiln-rocket-run
+[ "$(id -u)" -eq 0 ] || { echo "run as root"; exit 1; }
+grep -q '^rocket' /proc/modules 2>/dev/null || modprobe rocket 2>/dev/null || true
+[ -e /dev/accel/accel0 ] || { echo "kiln-rocket-run: /dev/accel/accel0 missing -- booted the ROCKET dtb? (extlinux 'rocket' entry)"; exit 1; }
+cd /opt/rocket && ./replay_rocket ./replay_payload
+ROCKET
+	echo "[kiln] installed rocket-mode workload -> /opt/rocket/ + /usr/bin/kiln-rocket-run"
+else
+	echo "[kiln] NOTE: KILN_ROCKET_ASSETS not set / replay_rocket missing; rocket-mode workload NOT baked"
+fi
+
 # --- 3. models + vision assets ----------------------------------------------
 mkdir -p "$TARGET_DIR/opt/models"
 # vision test image + ImageNet labels (small; always bake if present)

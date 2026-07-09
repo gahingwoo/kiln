@@ -4,9 +4,10 @@
 # DMABUF_HEAPS=y, IOMMU_DMA=y, ROCKCHIP_PM_DOMAINS=y, PM_DEVFREQ=y, CMA=y,
 # DMA_CMA=y -- all verified in that file).
 #
-# The ONE change vs the rocket fragment: turn ROCKET OFF so it does not bind the
-# NPU. Kiln drives the NPU with the out-of-tree vendor rknpu.ko instead.
-# CONFIG_DRM_ACCEL_ROCKET is not set
+# Dual-image: BOTH NPU drivers are present. The out-of-tree vendor rknpu.ko binds
+# npu@27700000 in the KILN dtb; the built-in accel/rocket binds it in the ROCKET
+# dtb. Only one DT node for that address exists per dtb (KILN_ROCKET_NPU swap), so
+# they never conflict. See CONFIG_DRM_ACCEL_ROCKET below.
 
 # rknpu.ko is out-of-tree (built in post-build.sh); the kernel only needs the
 # platform stack below (already =y in base.config, restated for clarity).
@@ -19,3 +20,17 @@ CONFIG_DMABUF_HEAPS=y
 CONFIG_ROCKCHIP_PM_DOMAINS=y
 # ext4 metadata_csum needs crc32c or the rootfs mount panics (rocket-tree note).
 CONFIG_CRYPTO_CRC32C=y
+
+# ftrace + tracepoints for capture/env-trace.sh (the vendor-vs-rocket driver-
+# environment diff). base.config has CONFIG_FTRACE off; FUNCTION_TRACER selects
+# TRACING -> tracefs + trace events + TRACEPOINTS, so the built-in
+# regmap_reg_write / clk / power_domain / iommu tracepoints are all present.
+CONFIG_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+
+# Dual-image: build the open accel/rocket driver BUILT-IN (not a module). It must
+# be =y, not =m: the fork's RK3576 patches call arch_sync_dma_for_device(), which
+# the kernel does NOT export to modules, so =m fails at modpost. Built-in is also
+# cleaner for the toggle -- rocket binds ONLY when a dtb provides an rknn_core
+# node (the ROCKET dtb); in the KILN dtb that node is #ifndef'd out, so it idles.
+CONFIG_DRM_ACCEL_ROCKET=y

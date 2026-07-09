@@ -24,7 +24,8 @@ BR2_ROOTFS_POST_SCRIPT_ARGS="$(BR2_EXTERNAL_KILN_PATH)/.."
 
 BR2_LINUX_KERNEL=y
 # Kernel source overridden at build time via LINUX_OVERRIDE_SRCDIR in the
-# generated local.mk (points at the linux-next tree with platform patches).
+# generated local.mk (points at the mainline 7.1.3 tree with kernel-patches/
+# 0001-0010 applied -- NOT linux-next).
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.1.3-kiln"
 BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
@@ -38,7 +39,7 @@ BR2_LINUX_KERNEL_DTS_SUPPORT=y
 # The vendor rknpu node + IOMMUs are added to the in-tree rk3576-rock-4d dtb by
 # kernel-patches/0004 (KERNEL_SRC must have 0001-0010 applied); clk_npu via CRU
 # (not SCMI). So we build the stock in-tree DTS name, no custom/overlay DTS.
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3576-rock-4d"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3576-rock-4d rockchip/rk3576-rock-4d-rocket"
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 
