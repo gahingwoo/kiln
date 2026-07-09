@@ -19,10 +19,14 @@
 set -euo pipefail
 
 KILN="$(cd "$(dirname "$0")/.." && pwd)"
-# 7.1.3 + Kiln vendor kernel-patches 0001-0010 already applied (read-only ref)
-VENDOR_SRC="${VENDOR_SRC:-/home/parallels/Desktop/kiln-713/linux-7.1.3}"
+# External reference trees (override via env; not in this repo). KILN_REF_ROOT
+# defaults to $HOME/Desktop only as a convenience -- set it to wherever you
+# cloned the refs, or set each path individually.
+KILN_REF_ROOT="${KILN_REF_ROOT:-$HOME/Desktop}"
+# 7.1.3 + Kiln vendor kernel-patches 0001-0010 already applied
+VENDOR_SRC="${VENDOR_SRC:-$KILN_REF_ROOT/kiln-713/linux-7.1.3}"
 # the open rocket RK3576 patch series (00*.patch, applied in order)
-ROCKET_PATCHES="${ROCKET_PATCHES:-/home/parallels/Desktop/linux-rk3576-npu/kernel}"
+ROCKET_PATCHES="${ROCKET_PATCHES:-$KILN_REF_ROOT/linux-rk3576-npu/kernel}"
 OUT="${OUT:-$KILN/kernel-dual/linux-7.1.3}"
 
 for p in "$VENDOR_SRC/Makefile" "$ROCKET_PATCHES"/0001-*.patch; do

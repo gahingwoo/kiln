@@ -8,25 +8,30 @@
 # tree must have kernel-patches/ 0001-0010 applied); the 713 defconfig builds the
 # in-tree rockchip/rk3576-rock-4d dtb, no custom DTS.
 #
-# Edit the four paths below to match your machine, then run this script.
+# These external inputs live OUTSIDE this repo. Point KILN_REF_ROOT at the dir
+# that holds the reference trees, or override any single path below. Nothing here
+# hardcodes an author-specific absolute path -- KILN_REF_ROOT defaults to
+# $HOME/Desktop only as a convenience; set it to wherever you cloned the refs.
 set -euo pipefail
 
-# ---- paths you must set -----------------------------------------------------
-BR_SRC="${BR_SRC:-/home/parallels/Desktop/linux-rk3576-npu/buildroot/br-src}"        # buildroot source
+# ---- external reference trees (override via env; not in this repo) -----------
+KILN_REF_ROOT="${KILN_REF_ROOT:-$HOME/Desktop}"
+BR_SRC="${BR_SRC:-$KILN_REF_ROOT/linux-rk3576-npu/buildroot/br-src}"                 # buildroot source
 # DUAL image: mainline 7.1.3 + vendor kernel-patches 0001-0010 + the open rocket
 # RK3576 series (accel/rocket rknn_core). Both NPU drivers coexist; the two DTB
 # variants (rk3576-rock-4d{,-rocket}) pick which one binds npu@27700000 at boot.
+# Default = the in-tree tree built by scripts/build-dual-kernel-tree.sh.
 KERNEL_SRC="${KERNEL_SRC:-$(cd "$(dirname "$0")/.." && pwd)/kernel-dual/linux-7.1.3}"
-BASE_CONFIG="${BASE_CONFIG:-/home/parallels/Desktop/linux-rk3576-npu/kernel/base.config}"  # kernel .config base
-ROCKCHIP_BINARIES="${ROCKCHIP_BINARIES:-/home/parallels/Desktop/rock4d_package/binaries}"   # rock4d u-boot dir
+BASE_CONFIG="${BASE_CONFIG:-$KILN_REF_ROOT/linux-rk3576-npu/kernel/base.config}"     # kernel .config base
+ROCKCHIP_BINARIES="${ROCKCHIP_BINARIES:-$KILN_REF_ROOT/rock4d_package/binaries}"     # rock4d u-boot dir
 # rocket-mode userspace assets (replay_rocket + captured payload + libteflon)
-KILN_ROCKET_ASSETS="${KILN_ROCKET_ASSETS:-/home/parallels/Desktop/linux-rk3576-npu/rootfs-overlay}"
+KILN_ROCKET_ASSETS="${KILN_ROCKET_ASSETS:-$KILN_REF_ROOT/linux-rk3576-npu/rootfs-overlay}"
 export KILN_ROCKET_ASSETS
 # -----------------------------------------------------------------------------
 
 KILN="$(cd "$(dirname "$0")/.." && pwd)"
 EXT="$KILN/buildroot"
-OUT="${OUT:-$KILN/br-out}"                # writable buildroot output (NOT under /home/parallels read-only trees)
+OUT="${OUT:-$KILN/br-out}"                # writable buildroot output (in-tree, not under the read-only refs)
 export ROCKCHIP_BINARIES
 
 for p in "$BR_SRC/Makefile" "$KERNEL_SRC/Makefile" "$BASE_CONFIG" "$ROCKCHIP_BINARIES/rock4d-sd-uboot.img"; do
