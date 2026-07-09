@@ -30,7 +30,6 @@ concurrency:
 
 env:
   KVER: ${{ github.event.inputs.kver || '7.1.3' }}
-  ARMBIAN_CFG_TAG: armbian-npu-kernel-edge   # reuse its rock-4d .config as the base
 
 jobs:
   build:
@@ -68,19 +67,12 @@ jobs:
             echo "applying $(basename "$f")"; patch -p1 < "$f"
           done
 
-      - name: Configure (ROCK 4D config base + disable rocket)
+      - name: Configure (mainline arm64 defconfig + NPU/NVMe drivers, disable rocket)
         run: |
           cd "$KDIR"
-          # Reuse the boot-tested ROCK 4D .config from the Armbian 7.1 kernel release;
-          # olddefconfig reconciles it to mainline. Fall back to defconfig.
-          url="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${ARMBIAN_CFG_TAG}" \
-                 | grep -o 'https://[^"]*linux-image[^"]*\.deb' | head -1 || true)"
-          if [ -n "$url" ] && curl -fsSL "$url" -o /tmp/aimg.deb; then
-            dpkg-deb -x /tmp/aimg.deb /tmp/aimg
-            cfg="$(find /tmp/aimg -name 'config-*' | head -1)"
-            [ -n "$cfg" ] && cp "$cfg" .config && echo "base config: $(basename "$cfg")"
-          fi
-          [ -f .config ] || make ARCH=arm64 defconfig
+          # Stock mainline arm64 defconfig (full RK3576 + ROCK 4D support is upstream),
+          # then force on exactly the pieces the NPU + root-on-NVMe need.
+          make ARCH=arm64 defconfig
           # vendor rknpu (out-of-tree) is used, not the open rocket driver
           ./scripts/config --disable DRM_ACCEL_ROCKET
           # keep the pieces the NPU stack needs on

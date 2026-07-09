@@ -109,7 +109,8 @@ buildroot/build-image.sh
 **Kernel** — CI publishes the `.deb`s; build it yourself per
 [`MAINLINE-KERNEL.md`](MAINLINE-KERNEL.md). The module alone builds against any
 patched 7.x tree: `make KDIR=/path/to/kernel/build` (after fetch + apply-shims).
-The DT node uses the **real** vendor RK3576 addresses (see `dts/`).
+The NPU DT node (`kernel-patches/0004`) uses the **real** vendor RK3576 addresses,
+not the guessed open-driver layout.
 
 ## Layout
 
@@ -119,7 +120,6 @@ The DT node uses the **real** vendor RK3576 addresses (see `dts/`).
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM; DKMS)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build);
   `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see `RK3568.md`)
-- `dts/` — `*-kiln-npu.dtso` NPU device-tree overlay (alternative Armbian path)
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`

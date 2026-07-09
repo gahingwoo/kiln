@@ -12,10 +12,7 @@ as a release), then build the module + runtimes on top.
 
 `scripts/kiln-install.sh` does exactly this, in two phases (Phase 1 installs the
 kernel and you reboot; Phase 2 builds the driver + tools). The NPU node is built
-into that kernel's DTB, so **no overlay is needed** on this path. (The standalone
-`dts/` overlay — which now also carries the `regulator-always-on` rail fix — is
-only for applying the NPU *device node* to a kernel that already has the code
-fixes, e.g. an Armbian kernel rebuilt with `kernel-patches/` in `userpatches/`.)
+into that kernel's DTB (`kernel-patches/0004`), so no DT overlay is involved.
 
 > **Status:** verified end-to-end on **mainline `linux-7.1.3`** (ROCK 4D,
 > RK3576): `kiln-chat` holds a multi-turn conversation (Qwen2.5-1.5B ~9 tok/s or
@@ -64,21 +61,6 @@ It installs the Kiln kernel (Phase 1), then builds the driver with DKMS (so the
 vermagic matches the running kernel) and installs the runtimes + tools (Phase 2).
 Re-runnable.
 
-## The standalone overlay (alternative path)
-
-`dts/rk3576-rock-4d-kiln-npu.dtso` is **not used** by the install above (the NPU
-node is already in the Kiln kernel's DTB). It exists for the case where you rebuild
-an Armbian kernel with `kernel-patches/` applied but do not change its board DTB:
-the overlay then adds the vendor-shaped `npu@27700000` plus its two v2 IOMMUs
-(`@27702000` / `@2770a000`) from scratch, referencing only `&cru`, `&power`,
-`&vdd_npu_s0` with **numeric** IDs so it builds with plain `dtc`, and it sets
-`regulator-always-on` on `vdd_npu_s0` (the overlay equivalent of 0010, without
-which the NPU works once and then hangs). Copy the prebuilt `.dtbo` to
-`/boot/overlay-user/kiln-npu.dtbo` and add `user_overlays=kiln-npu` to
-`/boot/armbianEnv.txt`. The overlay only supplies the *DT node* — it cannot supply
-the pmdomain/iommu code fixes, which is why the kernel itself must carry
-`kernel-patches/`.
-
 ## Verify
 
 ```sh
@@ -100,11 +82,10 @@ kiln-chat                       # chat; each turn prints a [bench] tok/s line
 - **Works once, then the second inference hangs the board** — the NPU rail
   (`vdd_npu_s0`) dropped. On the Kiln kernel this is fixed by 0010
   (`regulator-always-on`); confirm `dmesg | grep vdd_npu` shows **no**
-  `vdd_npu_s0: disabling`. On the overlay path, confirm the overlay carries the
-  `regulator-always-on` fragment.
+  `vdd_npu_s0: disabling`.
 - **Jobs time out (`task_counter=0`)** — confirm the `kiln mmu enable_all` line
-  shows `st=0x19/0x19/0x19/0x19`; if a bank is `0x18` the overlay/driver pairing
-  is off. See `driver/patches/README.md` for the mechanism.
+  shows `st=0x19/0x19/0x19/0x19`; if a bank is `0x18` the driver/DT pairing is off.
+  See `driver/patches/README.md` for the mechanism.
 - **DKMS build can't fetch** — `driver/fetch-vendor-driver.sh` needs network at
   build time; pre-fetch `driver/rknpu` on a connected machine and copy it in.
 
