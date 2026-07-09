@@ -118,23 +118,34 @@ arm_events() {
 	en iommu/attach_device_to_domain
 }
 
-# normalize a trace to comparable lines: STRIP the ftrace "task-pid [cpu] flags"
-# prefix (varies every run -- if left in, the diff is all noise) and keep only
-# the event + args (e.g. "regmap_reg_write: power-management@0x... reg=114 val=..").
+# normalize a trace to comparable lines: STRIP everything up to and including the
+# ftrace timestamp (the leading "task-pid [cpu] flags <ts>:" -- ALL of which vary
+# per run; if any is left in, the diff is pure noise). Keep only "event: args"
+# (e.g. "regmap_reg_write: power-management@0x... reg=114 val=..").  The greedy
+# .* backtracks to the timestamp, so it works whether or not the task/cpu/flags
+# prefix is present in this kernel's trace format.
 norm() {
 	grep -aE 'regmap_reg_write|clk_set_rate|clk_enable|power_domain_target|iommu' "$1" \
-		| sed -E 's/^.* \[[0-9]+\] [^ ]+ +//' | sort -u
+		| sed -E 's/^.*[0-9]+\.[0-9]+: //' | sort -u
 }
 
 echo "===== env-trace [$LABEL]: driver-environment writes around a CHAINED submit ====="
 echo "SoC=${SOC:-unknown}"
 arm_events
 
-echo "=== warm-up inference (absorbs the one-time cold power-on; discarded) ==="
-echo 1 > "$T/tracing_on"; run_infer "$@" || { echo "no workload ran -- aborting"; exit 1; }
-echo 0 > "$T/tracing_on"; : > "$T/trace"
+# COLD by default (fresh boot -> NPU cold): capture the FULL power-on + first
+# submit. This is the fair vendor-vs-rocket comparison. A WARM measurement is
+# confounded: the vendor holds the NPU up for power_put_delay=600s, so its warm
+# window is nearly empty (genpd/QoS/clock bring-up already done), while rocket
+# re-powers per submit -- the asymmetry, not a real arm, dominates the diff.
+if [ "${KILN_ENV_WARMUP:-0}" = "1" ]; then
+	echo "=== warm-up inference (KILN_ENV_WARMUP=1; discarded) ==="
+	echo 1 > "$T/tracing_on"; run_infer "$@" || { echo "no workload ran -- aborting"; exit 1; }
+	echo 0 > "$T/tracing_on"; : > "$T/trace"
+fi
 
-echo "=== measured inference (WARM -- per-submit environment only) ==="
+echo "=== measured inference (COLD: full power-on + first submit -- run on a FRESH"
+echo "    boot so the NPU is cold; KILN_ENV_WARMUP=1 measures a warm window instead) ==="
 echo 1 > "$T/tracing_on"; run_infer "$@" || echo "  WARN: measured workload returned nonzero"
 echo 0 > "$T/tracing_on"
 
