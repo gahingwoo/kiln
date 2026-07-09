@@ -119,9 +119,14 @@ open(variant, 'w').write(
 #define KILN_ROCKET_NPU 1
 #include "rk3576-rock-4d.dts"
 
-/* rknpu is #ifndef'd out in this build; enable only the rocket nodes. */
+/* rknpu is #ifndef'd out in this build; enable only the rocket nodes.
+ * List BOTH NPU power domains: the RK3576 NPU spans PD_NPU0 + PD_NPU1 and rocket
+ * attaches the multi-PD list explicitly. A multi-PD device skips the driver-core
+ * single-PD auto-attach, which otherwise races rocket's attach -> -EEXIST probe
+ * failure (the dtsi lists only PD_NPU0 by default). */
 &rknn_core_0 {
 \tnpu-supply = <&vdd_npu_s0>;
+\tpower-domains = <&power RK3576_PD_NPU0>, <&power RK3576_PD_NPU1>;
 \tstatus = "okay";
 };
 &rknn_mmu_0  { status = "okay"; };

@@ -47,6 +47,35 @@ LABEL="${1:-$(cat /proc/sys/kernel/hostname 2>/dev/null || echo stack)}"
 # an optional explicit workload command follows a `--`; the rest of "$@" is it
 if [ "${1:-}" = "--" ]; then shift; fi
 
+# Persist captures on the rootfs (NOT /tmp -- tmpfs is wiped by the power-cycle
+# between kiln and rocket modes, so /tmp files never coexist to be diffed).
+OUTDIR="${KILN_ENV_DIR:-/root/kiln-env}"
+mkdir -p "$OUTDIR" 2>/dev/null || true
+
+# CPU-cluster DVFS clocks are per-run noise (the governor picks different points);
+# drop them from the diff so only the NPU-relevant environment remains.
+NOISE='scmi_armclk|scmi_armclkl|scmi_armclkb'
+
+# Sub-command:  kiln-env-trace diff  -> compare the two persisted captures on the
+# board (busybox has sort+awk but no comm). Prints vendor-only (in kiln, not
+# rocket = the arm suspect) and rocket-only writes.
+if [ "$LABEL" = "diff" ]; then
+	A="$OUTDIR/env-kiln.txt"; B="$OUTDIR/env-rocket.txt"
+	for f in "$A" "$B"; do
+		[ -f "$f" ] || { echo "missing $f -- capture both modes first:"; \
+			echo "  kiln-env-trace kiln   (reboot)   kiln-env-trace rocket -- kiln-rocket-run"; exit 1; }
+	done
+	grep -avE "$NOISE" "$A" | sort -u > "$OUTDIR/.a"
+	grep -avE "$NOISE" "$B" | sort -u > "$OUTDIR/.b"
+	echo "===== VENDOR(kiln)-only env writes (in kiln, NOT rocket) = the arm suspect ====="
+	awk 'NR==FNR{s[$0];next} !($0 in s)' "$OUTDIR/.b" "$OUTDIR/.a"
+	echo
+	echo "===== ROCKET-only env writes (rocket does, vendor doesn't) ====="
+	awk 'NR==FNR{s[$0];next} !($0 in s)' "$OUTDIR/.a" "$OUTDIR/.b"
+	rm -f "$OUTDIR/.a" "$OUTDIR/.b"
+	exit 0
+fi
+
 T=/sys/kernel/tracing
 [ -d "$T/events" ] || mount -t tracefs nodev "$T" 2>/dev/null || true
 if [ ! -d "$T/events" ]; then
@@ -62,14 +91,19 @@ SOC="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null | grep -oE 'rk35[0-
 MODEL_RKNN="/opt/models/mobilenetv2-12_${SOC:-rk3576}.rknn"
 IMG="/opt/models/test.jpg"
 
-run_infer() {  # runs the explicit "$@" workload if given, else auto-detects one
-	if [ "$#" -gt 0 ]; then "$@" >/dev/null 2>&1 || true
+run_infer() {  # runs the explicit "$@" workload if given, else auto-detects one.
+	# An explicit workload's exit status PROPAGATES (so a broken rocket workload --
+	# e.g. rocket didn't bind, no /dev/accel/accel0 -- aborts loudly instead of
+	# silently tracing nothing). Auto-detected launchers stay tolerant.
+	if [ "$#" -gt 0 ]; then "$@" >/dev/null 2>&1; return $?
 	elif command -v kiln-vision    >/dev/null 2>&1; then kiln-vision    "$IMG" >/dev/null 2>&1 || true
 	elif command -v rknn_mobilenet >/dev/null 2>&1; then rknn_mobilenet "$MODEL_RKNN" "$IMG" >/dev/null 2>&1 || true
 	else echo "  (no workload found -- pass one:  $0 $LABEL -- <cmd>)"; return 1; fi
 }
 
-en() { echo 1 > "$T/events/$1/enable" 2>/dev/null || true; }
+# enable a tracepoint only if it exists on this kernel (avoids a noisy redirect
+# error for events not built in, e.g. power_domain_target on some configs).
+en() { [ -e "$T/events/$1/enable" ] && echo 1 > "$T/events/$1/enable" 2>/dev/null || true; }
 arm_events() {
 	echo nop > "$T/current_tracer"
 	echo 0 > "$T/tracing_on"; : > "$T/trace"
@@ -84,11 +118,12 @@ arm_events() {
 	en iommu/attach_device_to_domain
 }
 
-# normalize a trace to comparable lines: drop pid/timestamp, keep event +
-# device/reg/val (comparable across stacks: same kernel, same HW).
+# normalize a trace to comparable lines: STRIP the ftrace "task-pid [cpu] flags"
+# prefix (varies every run -- if left in, the diff is all noise) and keep only
+# the event + args (e.g. "regmap_reg_write: power-management@0x... reg=114 val=..").
 norm() {
 	grep -aE 'regmap_reg_write|clk_set_rate|clk_enable|power_domain_target|iommu' "$1" \
-		| sed -E 's/^[^:]*: //; s/ [0-9]+\.[0-9]+: / /; s/^ *//' | sort -u
+		| sed -E 's/^.* \[[0-9]+\] [^ ]+ +//' | sort -u
 }
 
 echo "===== env-trace [$LABEL]: driver-environment writes around a CHAINED submit ====="
@@ -100,15 +135,18 @@ echo 1 > "$T/tracing_on"; run_infer "$@" || { echo "no workload ran -- aborting"
 echo 0 > "$T/tracing_on"; : > "$T/trace"
 
 echo "=== measured inference (WARM -- per-submit environment only) ==="
-echo 1 > "$T/tracing_on"; run_infer "$@"; echo 0 > "$T/tracing_on"
+echo 1 > "$T/tracing_on"; run_infer "$@" || echo "  WARN: measured workload returned nonzero"
+echo 0 > "$T/tracing_on"
 
-OUT="/tmp/env-${LABEL}.txt"
+OUT="$OUTDIR/env-${LABEL}.txt"
 norm "$T/trace" > "$OUT"
 echo "  -> $(wc -l < "$OUT") unique env events -> $OUT"
 echo
-echo "=== highlight: iommu / clk / genpd / pvtpll / grf on this stack ==="
-grep -aiE 'iommu|clk_set_rate|power_domain|pvtpll|grf' "$OUT" | head -60 || true
+echo "=== highlight: NPU-relevant env writes (regmap/iommu/genpd/npu/grf; CPU clk dropped) ==="
+grep -aiE 'regmap_reg_write|iommu|power-management|npu|grf|pvtpll|repair' "$OUT" \
+	| grep -avE "$NOISE" | head -60 || true
 echo
-echo "next: copy /tmp/env-${LABEL}.txt off the board; run this on the OTHER stack;"
-echo "then diff (vendor-ONLY writes = the arm suspect):"
-echo "  comm -13 <(sort -u /tmp/env-rocket.txt) <(sort -u /tmp/env-kiln.txt)"
+echo "next: capture the OTHER mode too, then diff ON THE BOARD (survives reboot):"
+echo "  # kiln mode:   kiln-env-trace kiln"
+echo "  # power-cycle, rocket mode:  kiln-env-trace rocket -- kiln-rocket-run"
+echo "  kiln-env-trace diff        # vendor-only writes = the arm suspect"
