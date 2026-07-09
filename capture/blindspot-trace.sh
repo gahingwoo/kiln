@@ -33,8 +33,19 @@
 set -eu
 
 T=/sys/kernel/tracing
-[ -d "$T/events" ] || T=/sys/kernel/debug/tracing
-[ -d "$T/events" ] || { echo "ftrace not mounted (need CONFIG_FTRACE + tracefs)"; exit 1; }
+# tracefs is often present but not auto-mounted on a minimal rootfs -- mount it.
+[ -d "$T/events" ] || mount -t tracefs nodev "$T" 2>/dev/null || true
+if [ ! -d "$T/events" ]; then
+	T=/sys/kernel/debug/tracing
+	mount -t debugfs nodev /sys/kernel/debug 2>/dev/null || true
+fi
+[ -d "$T/events" ] || {
+	echo "ftrace not available. In the kernel?  grep -w tracefs /proc/filesystems"
+	echo "  if yes: sudo mount -t tracefs nodev /sys/kernel/tracing"
+	echo "  if no:  the kernel needs CONFIG_FTRACE/CONFIG_TRACING (rebuild)"
+	exit 1
+}
+[ -d "$T/events/regmap" ] || echo "NOTE: $T/events/regmap missing -- regmap tracepoint off (CONFIG_REGMAP tracing)?"
 
 # infer the on-board vision command / model for whichever SoC this is
 SOC="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null | grep -oE 'rk35[0-9][0-9]' | head -1 || true)"
