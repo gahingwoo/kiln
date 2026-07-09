@@ -367,6 +367,23 @@ int main(int argc, char **argv) {
     if (argc > 2) cfg.llm_max_new_tokens = atoi(argv[2]);
     if (argc > 3) cfg.llm_max_context_len = atoi(argv[3]);
 
+    // If the configured model file is missing, fall back to any .rkllm in its
+    // directory -- a fresh box often has a different model than the default, and
+    // hard-failing on a fixed filename is unfriendly.
+    if (!cfg.llm_model.empty() && !file_exists(cfg.llm_model)) {
+        std::string dir = dir_of(cfg.llm_model);
+        std::vector<std::string> models = list_models(dir);
+        if (!models.empty()) {
+            printf("[configured model '%s' not found; using '%s']\n",
+                   base_of(cfg.llm_model).c_str(), models[0].c_str());
+            cfg.llm_model = dir + "/" + models[0];
+        } else {
+            printf("no .rkllm model in %s -- copy one there or set [llm].model in %s\n",
+                   dir.c_str(), kiln::config_path().c_str());
+            return -1;
+        }
+    }
+
     signal(SIGINT, on_sigint);
     printf("rkllm init start\n");
 
