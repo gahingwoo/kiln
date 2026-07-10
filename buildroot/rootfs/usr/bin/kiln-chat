@@ -20,5 +20,24 @@ if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
 	exit 1
 fi
 
+# preflight the LLM model (config-driven), unless a model was given on the CLI
+# (old form: kiln-chat <model.rkllm> ...). kiln-chat itself falls back to any
+# *.rkllm in /opt/models if the configured one is missing, so only stop when there
+# is NOTHING usable -- and then point at kiln-config instead of failing cryptically.
+case "${1:-}" in
+*.rkllm) : ;;   # explicit model given -- skip the config preflight
+*)
+	CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
+	LLM_MODEL=$(awk '/^[ \t]*\[/{s=$0} s ~ /^[ \t]*\[llm\]/ && /^[ \t]*model[ \t]*=/{sub(/^[^=]*=/,"");sub(/[ \t]#.*/,"");gsub(/^[ \t]+|[ \t]+$/,"");print;exit}' "$CONF" 2>/dev/null)
+	if { [ -z "$LLM_MODEL" ] || [ ! -f "$LLM_MODEL" ]; } && ! ls /opt/models/*.rkllm >/dev/null 2>&1; then
+		echo "kiln-chat: no LLM model available."
+		echo "  Kiln doesn't ship one. Put a *-rk3576-w4a16.rkllm in /opt/models, then pick it with:"
+		echo "      sudo kiln-config  ->  LLM Settings  ->  model"
+		echo "  (any .rkllm there works; see README for where to get one)."
+		exit 1
+	fi
+	;;
+esac
+
 echo "Loading the model onto the NPU (takes a few seconds) ..."
 exec rkllm_demo "$@"

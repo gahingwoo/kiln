@@ -18,5 +18,23 @@ if ! grep -q '^rknpu' /proc/modules 2>/dev/null; then
 	exit 1
 fi
 
+# preflight the vision model (config-driven), unless a model was given on the CLI
+# (old form: kiln-vision <model.rknn> <image> [labels]). Vision has no fallback, so
+# a missing .rknn is fatal -- point at kiln-config / VISION.md instead of a cryptic
+# "cannot read model" from the binary.
+case "${1:-}" in
+*.rknn) : ;;   # explicit model given -- skip the config preflight
+*)
+	CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
+	VIS_MODEL=$(awk '/^[ \t]*\[/{s=$0} s ~ /^[ \t]*\[vision\]/ && /^[ \t]*model[ \t]*=/{sub(/^[^=]*=/,"");sub(/[ \t]#.*/,"");gsub(/^[ \t]+|[ \t]+$/,"");print;exit}' "$CONF" 2>/dev/null)
+	if [ -z "$VIS_MODEL" ] || [ ! -f "$VIS_MODEL" ]; then
+		echo "kiln-vision: no vision model found (config [vision] model = '${VIS_MODEL:-unset}')."
+		echo "  Convert a MobileNet .rknn -- it runs on the board now, see VISION.md -- put it in /opt/models,"
+		echo "  then pick it with:  sudo kiln-config  ->  Vision Settings  ->  model"
+		exit 1
+	fi
+	;;
+esac
+
 echo "=== Kiln RK3576 NPU vision (MobileNet, librknnrt) ==="
 exec rknn_mobilenet "$@"
