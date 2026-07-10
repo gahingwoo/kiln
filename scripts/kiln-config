@@ -342,7 +342,8 @@ advanced_page() {
 		sel=$(menu "Advanced" "system actions -- each asks to confirm; some need a reboot" \
 			reload "reload the rknpu driver (rmmod + modprobe)" \
 			driver "rebuild the rknpu DKMS module + restore wifi" \
-			update "re-run the installer (checks for a kernel update, rebuilds all)" \
+			update "update Kiln (git pull + rebuild driver/runtimes; NO kernel change)" \
+			kernel "check for a Kiln KERNEL update (may reinstall + reboot)" \
 			-      "----------------------------" \
 			BACK   "back") || return
 		case "$sel" in
@@ -356,8 +357,12 @@ advanced_page() {
 					&& run_installer "KILN_SKIP_KERNEL=1 KILN_SKIP_RUNTIMES=1" ;;
 			update)
 				[ -f "$INSTALLER" ] || { msg "installer not found at $INSTALLER"; continue; }
-				yesno "Re-run the full installer now?\n\nIt checks for a newer Kiln kernel and rebuilds the driver + runtimes. May reboot." \
+				yesno "Update Kiln now?\n\ngit pull + rebuild the driver + runtimes. Does NOT touch the kernel (no reboot)." \
 					&& run_installer "" ;;
+			kernel)
+				[ -f "$INSTALLER" ] || { msg "installer not found at $INSTALLER"; continue; }
+				yesno "Check for a newer Kiln KERNEL now?\n\nIf a newer build is published it reinstalls the kernel and the machine REBOOTS to finish. Don't cut power." \
+					&& run_installer "KILN_CHECK_KERNEL=1" ;;
 			BACK|"") return ;;
 		esac
 	done

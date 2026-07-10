@@ -47,8 +47,13 @@
 #                          you reboot and re-run the installer yourself
 #
 # A driver-only run (KILN_SKIP_RUNTIMES=1, kernel unchanged) reloads the module
-# itself (rmmod+modprobe) instead of asking for a reboot. KILN_FORCE_KERNEL=1
-# still forces a kernel reinstall regardless of the above.
+# itself (rmmod+modprobe) instead of asking for a reboot.
+#
+# KERNEL UPDATES ARE OPT-IN. Once you're on the Kiln kernel, a re-run (e.g. a Kiln
+# update) does NOT reinstall the kernel -- so it won't re-run the reboot flow just
+# because CI republished the same kernel with a newer build-timestamp version. To
+# pick up a genuinely newer kernel: KILN_CHECK_KERNEL=1 (reinstalls only if the
+# published version differs) or KILN_FORCE_KERNEL=1 (always reinstalls).
 set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
@@ -277,18 +282,21 @@ install_phase2_service(){
 	$SUDO rm -f /etc/kiln/phase2-done /etc/kiln/phase2-failed
 	$SUDO tee /etc/systemd/system/kiln-phase2.service >/dev/null <<EOF
 [Unit]
-Description=Kiln install phase 2 (offline: rknpu driver + runtimes + wifi, then reboot)
-# No network dependency ON PURPOSE: phase 2 runs offline from the phase-1 cache
-# (onboard wifi is down until it rebuilds it). Just wait for a normal multi-user
-# system. The ConditionPathExists makes it a no-op once phase 2 has completed.
-After=multi-user.target
+Description=Kiln: finishing install (driver + runtimes + wifi) -- do NOT power off
+# Runs BEFORE any login is permitted: systemd-user-sessions.service is the gate that
+# enables logins, so ordering before it means the user never lands on the half-set-up
+# intermediate boot (onboard wifi is still down until this rebuilds it). Offline from
+# the phase-1 cache -- no network dependency. Reboots into the finished system when
+# done; ConditionPathExists makes it a no-op once phase 2 has completed.
+After=basic.target
+Before=systemd-user-sessions.service
 ConditionPathExists=!/etc/kiln/phase2-done
 
 [Service]
 Type=oneshot
 ExecStart=$KILN_DIR/scripts/kiln-phase2.sh
 RemainAfterExit=yes
-TimeoutStartSec=2400
+TimeoutStartSec=1800
 StandardOutput=journal+console
 StandardError=journal+console
 
@@ -355,6 +363,13 @@ on_patched_kernel(){
 	[ -n "${KILN_FORCE_KERNEL:-}" ] && return 1
 	[ -f "$MARKER" ] || return 1
 	[ "$KREL" = "$(sed -n 1p "$MARKER" 2>/dev/null)" ] || return 1
+	# We're running the Kiln kernel. By DEFAULT do NOT reinstall it just because CI
+	# republished a newer .deb -- its version is a build timestamp, so it bumps on
+	# every rebuild even when the kernel code is identical, which would re-run the
+	# whole kernel+reboot flow on an ordinary Kiln update. Kernel updates are opt-in:
+	# KILN_CHECK_KERNEL=1 (or kiln-config -> Advanced) compares the published version
+	# and reinstalls if it's genuinely newer; KILN_FORCE_KERNEL=1 always reinstalls.
+	[ -n "${KILN_CHECK_KERNEL:-}" ] || return 0
 	local want; want="$(kernel_release_ver)"
 	[ -z "$want" ] && return 0
 	[ "$(sed -n 2p "$MARKER" 2>/dev/null)" = "$want" ]
