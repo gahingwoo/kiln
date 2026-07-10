@@ -3,8 +3,13 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 #
-# Runs on Armbian userspace with a Kiln MAINLINE kernel. Two phases (it tells you
-# when to reboot between them):
+# Runs on Armbian userspace with a Kiln MAINLINE kernel. Two phases. By DEFAULT it
+# is hands-off: run the one command and the machine reboots ITSELF TWICE (~10-15
+# min) into a finished system -- a systemd oneshot (kiln-phase2.service ->
+# scripts/kiln-phase2.sh) auto-continues phase 2 offline after the first reboot,
+# then reboots again and reports the outcome at login. Set KILN_MANUAL=1 to drive
+# the two phases by hand instead (reboot + re-run yourself; no service, no auto
+# reboot).
 #
 #   PHASE 1 — on the stock kernel (with network): PRE-DOWNLOADS everything phase 2
 #     needs into an on-disk cache under $KILN_DIR (closed runtimes + demo sources,
@@ -38,6 +43,8 @@
 #   KILN_SKIP_DRIVER=1    don't rebuild/reinstall the rknpu DKMS module
 #   KILN_SKIP_RUNTIMES=1  don't re-fetch RKLLM/RKNN runtimes or rebuild the
 #                          demos/kiln-serve (the slow, network-heavy part)
+#   KILN_MANUAL=1         don't install the auto-handoff service or auto-reboot;
+#                          you reboot and re-run the installer yourself
 #
 # A driver-only run (KILN_SKIP_RUNTIMES=1, kernel unchanged) reloads the module
 # itself (rmmod+modprobe) instead of asking for a reboot. KILN_FORCE_KERNEL=1
@@ -254,6 +261,46 @@ predownload_cache(){
 	fi
 }
 
+# Install a one-shot systemd service that finishes phase 2 on the next boot,
+# OFFLINE, then reboots into the finished system -- so the whole install is "run
+# one command, walk away". A plain systemd oneshot (not a bootloader one-shot
+# trick), so it works under the ROCK 4D's u-boot exactly like it would with GRUB.
+# It disables itself when done (kiln-phase2.sh) and won't re-run once phase 2 has
+# completed (ConditionPathExists + the phase2-done marker we clear here for a
+# re-install). Returns non-zero if there's no systemd -> caller falls back to
+# manual mode. KILN_MANUAL=1 skips this entirely.
+install_phase2_service(){
+	[ -d /etc/systemd/system ] || { say "no systemd here -- can't auto-continue; use the manual steps below."; return 1; }
+	[ -f "$KILN_DIR/scripts/kiln-phase2.sh" ] || { say "kiln-phase2.sh missing -- can't auto-continue; use the manual steps below."; return 1; }
+	# Clear any stale status from a previous install so the oneshot runs for THIS
+	# (re)install and the login MOTD reflects the fresh run.
+	$SUDO rm -f /etc/kiln/phase2-done /etc/kiln/phase2-failed
+	$SUDO tee /etc/systemd/system/kiln-phase2.service >/dev/null <<EOF
+[Unit]
+Description=Kiln install phase 2 (offline: rknpu driver + runtimes + wifi, then reboot)
+# No network dependency ON PURPOSE: phase 2 runs offline from the phase-1 cache
+# (onboard wifi is down until it rebuilds it). Just wait for a normal multi-user
+# system. The ConditionPathExists makes it a no-op once phase 2 has completed.
+After=multi-user.target
+ConditionPathExists=!/etc/kiln/phase2-done
+
+[Service]
+Type=oneshot
+ExecStart=$KILN_DIR/scripts/kiln-phase2.sh
+RemainAfterExit=yes
+TimeoutStartSec=2400
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	$SUDO systemctl daemon-reload 2>/dev/null || true
+	$SUDO systemctl enable kiln-phase2.service >/dev/null 2>&1 \
+		|| { say "couldn't enable kiln-phase2.service -- use the manual steps below."; return 1; }
+	return 0
+}
+
 # --- 0. preflight -----------------------------------------------------------
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
@@ -354,12 +401,35 @@ elif ! on_patched_kernel; then
 	# run can tell a newer published build from the one already installed.
 	DEBVER="$(basename "$IMG" | awk -F_ '{print $2}')"
 	$SUDO mkdir -p /etc/kiln; printf '%s\n%s\n' "$KREL_NEW" "$DEBVER" | $SUDO tee "$MARKER" >/dev/null
+
+	# Auto-handoff (default): a systemd oneshot finishes phase 2 offline on the next
+	# boot and reboots again into the finished system -- one command, walk away.
+	# KILN_MANUAL=1 keeps the old hands-on flow (reboot + re-run yourself).
+	if [ -z "${KILN_MANUAL:-}" ] && install_phase2_service; then
+		cat <<EOF
+
+[kiln] Mainline NPU kernel $KREL_NEW installed and everything phase 2 needs is
+       cached. From here it is HANDS-OFF: the machine will REBOOT ITSELF TWICE
+       (~10-15 min total) -- once into the new kernel to finish setup (offline),
+       then again into the finished system. DON'T CUT POWER. Onboard wifi is down
+       between the reboots (expected); phase 2 doesn't need it. When it's done
+       you'll see "Kiln installed" at the next login (or check kiln-doctor).
+       Full phase-2 log: /var/log/kiln-phase2.log
+
+       Rebooting in 5s ...
+EOF
+		sync; sleep 5
+		$SUDO systemctl reboot
+		exit 0
+	fi
+
+	# Manual mode (KILN_MANUAL=1, or no systemd to auto-continue).
 	cat <<EOF
 
 [kiln] Mainline NPU kernel $KREL_NEW installed, and everything phase 2 needs is
        cached on disk. Onboard wifi will be DOWN on the new kernel until phase 2
-       rebuilds it -- but phase 2 now runs fully OFFLINE, so that's fine. REBOOT
-       into the new kernel, then run this installer again to finish:
+       rebuilds it -- but phase 2 runs fully OFFLINE, so that's fine. REBOOT into
+       the new kernel, then run this installer again to finish:
 
            sudo reboot
            sudo bash $KILN_DIR/scripts/kiln-install.sh   # runs offline, no wifi needed
@@ -469,6 +539,10 @@ else
 		  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
 	fi
 	$SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
+	# login MOTD that reports the phase-2 install outcome (the auto-handoff's
+	# success/failure surface). Harmless in manual mode too.
+	[ -f buildroot/rootfs/etc/profile.d/kiln-motd.sh ] \
+		&& $SUDO install -m0644 buildroot/rootfs/etc/profile.d/kiln-motd.sh /etc/profile.d/kiln-motd.sh || true
 	# optional systemd unit for kiln-serve
 	if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
 		$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/
@@ -524,6 +598,10 @@ fi
 
 # --- 7. finish --------------------------------------------------------------
 $SUDO depmod -a "$KREL" || true
+# Record phase-2 completion: drives the login MOTD, is checked by kiln-doctor, and
+# (via the service's ConditionPathExists) stops the auto-handoff oneshot from ever
+# re-running. We only reach section 7 in phase 2, so getting here means done.
+$SUDO mkdir -p /etc/kiln; $SUDO rm -f /etc/kiln/phase2-failed; $SUDO touch /etc/kiln/phase2-done
 if [ "$KERNEL_CHANGED" = 1 ] || { [ "$DRIVER_REBUILT" = 1 ] && [ "$DRIVER_RELOADED" = 0 ]; }; then
 	cat <<EOF
 
