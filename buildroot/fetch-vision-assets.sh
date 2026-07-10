@@ -12,16 +12,23 @@ MODEL="$(cd "$(dirname "$0")/.." && pwd)/model"
 mkdir -p "$MODEL"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
-echo "[kiln] fetching mobilenet test image + labels from rknn_model_zoo ..."
-git clone --filter=blob:none --sparse --depth 1 \
-	https://github.com/airockchip/rknn_model_zoo.git "$tmp/z"
-( cd "$tmp/z" && git sparse-checkout set examples/mobilenet )
-M="$tmp/z/examples/mobilenet/model"
+# Idempotent: skip the clone if the test image + labels are already staged, so a
+# cache pre-fetched (online) in installer phase 1 lets phase 2 run OFFLINE.
+# KILN_FORCE_FETCH=1 forces a refresh.
+if [ -z "${KILN_FORCE_FETCH:-}" ] && [ -s "$MODEL/test.jpg" ] && [ -s "$MODEL/imagenet_labels.txt" ]; then
+	echo "[kiln] have model/test.jpg + model/imagenet_labels.txt (skip rknn_model_zoo clone)"
+else
+	echo "[kiln] fetching mobilenet test image + labels from rknn_model_zoo ..."
+	git clone --filter=blob:none --sparse --depth 1 \
+		https://github.com/airockchip/rknn_model_zoo.git "$tmp/z"
+	( cd "$tmp/z" && git sparse-checkout set examples/mobilenet )
+	M="$tmp/z/examples/mobilenet/model"
 
-cp "$M/bell.jpg" "$MODEL/test.jpg"
-# ImageNet labels; strip the leading "nXXXXXXXX " synset id for clean names.
-sed 's/^n[0-9]* //' "$M/synset.txt" > "$MODEL/imagenet_labels.txt"
-echo "[kiln] -> model/test.jpg  and  model/imagenet_labels.txt ($(wc -l < "$MODEL/imagenet_labels.txt") classes)"
+	cp "$M/bell.jpg" "$MODEL/test.jpg"
+	# ImageNet labels; strip the leading "nXXXXXXXX " synset id for clean names.
+	sed 's/^n[0-9]* //' "$M/synset.txt" > "$MODEL/imagenet_labels.txt"
+	echo "[kiln] -> model/test.jpg  and  model/imagenet_labels.txt ($(wc -l < "$MODEL/imagenet_labels.txt") classes)"
+fi
 
 cat <<'EOF'
 
