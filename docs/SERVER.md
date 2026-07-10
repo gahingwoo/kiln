@@ -89,6 +89,10 @@ system-prompt come from `[llm]`.
 
 - One model per process (loaded at startup). To serve a different `.rkllm`,
   restart with `--model` or change the config. The `model` field in a request is
-  echoed back but does not hot-swap.
+  **ignored** — the response always reports the actually-loaded model, and there
+  is no hot-swap.
+- Vision-only mode: with no `.rkllm` loaded (e.g. an RK3568 box, or a bad LLM path)
+  the server still starts and serves `POST /v1/vision/classify`; `/v1/chat/completions`
+  then returns **503**.
 - One generation at a time (NPU is single-tenant); concurrent requests queue.
 - HTTP only (no TLS). Put it behind a reverse proxy if you need HTTPS/auth.

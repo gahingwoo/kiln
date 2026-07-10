@@ -26,7 +26,7 @@ survives a restart.
 | `/clear` | forget the conversation; keep the system prompt |
 | `/new` | start a fresh session (clear + reset counters) |
 | `/history [on\|off]` | multi-turn memory on/off; no argument shows the current state |
-| `/system [text\|clear]` | show, set, or clear the system prompt (resets the session) |
+| `/system [text\|clear\|none]` | show, set, or clear (`clear`/`none`) the system prompt (resets the session) |
 | `/context` | show the context window and session counters |
 | `/compact` | summarize the conversation into the system prompt to free up context |
 | `/model [name]` | switch model; with no name, pick from a list with the arrow keys |
@@ -75,4 +75,5 @@ that would make it reliable, and faking it would change the inference path.
 them (you'll see `[saved to …]`), so the model, system prompt, and multi-turn
 setting survive a restart. The system prompt is **empty by default** (model-neutral);
 `/system clear` blanks it and persists that. Sampling and the other `[llm]` fields
-are edited in the file directly — see [`CONFIG.md`](CONFIG.md).
+are edited in the file directly — or via `sudo kiln-config` → LLM Settings — see
+[`CONFIG.md`](CONFIG.md).

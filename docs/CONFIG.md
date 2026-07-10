@@ -1,9 +1,22 @@
 # Kiln configuration
 
-Kiln keeps one config, `/etc/kiln/config.ini`, read by **every** tool
-(`kiln-chat`, `kiln-vision`, `kiln-serve`). Nothing is hard-coded per tool.
-Edit it by hand — it is a plain INI file. `kiln-install.sh` seeds a working
-default, so a fresh box runs without touching it.
+Kiln keeps one config, `/etc/kiln/config.ini`, read by **every** tool — `kiln-chat`,
+`kiln-vision`, `kiln-serve`, and also `kiln-config` and `kiln-doctor`. Nothing is
+hard-coded per tool. `kiln-install.sh` seeds a working default, so a fresh box runs
+without touching it.
+
+## Editing it
+
+It stays a **hand-editable** plain INI file — that is the single source of truth. Two
+optional front-ends:
+
+- **`sudo kiln-config`** — a whiptail TUI (LLM / Vision / Server pages). It edits the
+  file **in place**, preserving your comments and any unknown fields; `<Save>` writes,
+  `<Back>` discards. See [`TOOLS.md`](TOOLS.md).
+- **`kiln-doctor`** — reads the file and checks the referenced models exist and are
+  version-matched, alongside the driver/MMU health checks. See [`TOOLS.md`](TOOLS.md).
+
+`kiln-chat` also changes a few LLM knobs live and persists them (below).
 
 For the LLM you usually do not need to edit the file at all: `kiln-chat` can
 change the live knobs with slash commands — `/model` to switch model, `/system`
@@ -64,7 +77,7 @@ it does not configure them.
 model = /opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
 max_context_len = 2048
 temperature = 0.8
-keep_history = 0
+keep_history = 1          # 1 = multi-turn (default), 0 = single-turn
 system_prompt = You are a helpful assistant.
 
 [vision]

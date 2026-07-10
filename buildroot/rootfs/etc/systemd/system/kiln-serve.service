@@ -1,5 +1,5 @@
 [Unit]
-Description=Kiln NPU LLM server (OpenAI-compatible API on the RK3576 NPU)
+Description=Kiln NPU model server (OpenAI-compatible LLM + vision API on the RK3576 NPU)
 After=network-online.target
 Wants=network-online.target
 
