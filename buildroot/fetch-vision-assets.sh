@@ -30,6 +30,27 @@ else
 	echo "[kiln] -> model/test.jpg  and  model/imagenet_labels.txt ($(wc -l < "$MODEL/imagenet_labels.txt") classes)"
 fi
 
+# Optional: fetch a pre-converted default MobileNet .rknn so the install ends
+# ready-to-run for vision. The mobilenetv2-12 ONNX (Apache-2.0) and its rknn_model_zoo
+# recipe (Apache-2.0) make a converted .rknn license-clean to redistribute, but
+# Rockchip publishes no pre-converted RK3576 .rknn -- so this pulls it from a
+# Kiln-hosted release IF one is configured. Set KILN_MODELS_URL to the base URL
+# that serves "$RKNN" (e.g. a GitHub release-asset base). Best-effort + idempotent;
+# with no URL set (the default), we just print the convert-it-yourself recipe below.
+RKNN="${KILN_MODEL_RKNN:-mobilenetv2-12_rk3576.rknn}"
+if [ -s "$MODEL/$RKNN" ]; then
+	echo "[kiln] have model/$RKNN (skip download)"
+	GOT_RKNN=1
+elif [ -n "${KILN_MODELS_URL:-}" ]; then
+	echo "[kiln] fetching default vision model $RKNN from $KILN_MODELS_URL ..."
+	if curl -fsSL --connect-timeout 8 "$KILN_MODELS_URL/$RKNN" -o "$MODEL/$RKNN.part" && [ -s "$MODEL/$RKNN.part" ]; then
+		mv "$MODEL/$RKNN.part" "$MODEL/$RKNN"; echo "[kiln] -> model/$RKNN"; GOT_RKNN=1
+	else
+		rm -f "$MODEL/$RKNN.part"; echo "[kiln] note: couldn't fetch $RKNN from KILN_MODELS_URL; convert it yourself (below)."
+	fi
+fi
+[ -n "${GOT_RKNN:-}" ] && exit 0   # ready-to-run; skip the convert-it-yourself note
+
 cat <<'EOF'
 
 [kiln] You still need a MobileNet .rknn for RK3576. Convert it once with

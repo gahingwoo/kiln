@@ -114,7 +114,18 @@ if [ -z "$VIS" ]; then
 elif [ -f "$VIS" ]; then ok "vision model present: $VIS"
 else bad "vision model MISSING: $VIS -- convert a MobileNet .rknn (see VISION.md) or fix it in kiln-config"; fi
 if [ -n "$LAB" ] && [ ! -f "$LAB" ]; then warn "vision labels file missing: $LAB"; fi
-info "models must match the runtime version (librknnrt 2.3.0 / librkllmrt 1.2.0); a mismatch throws std::out_of_range in rknn_inputs_set"
+# Version guard: a .rknn embeds the rknn-toolkit2 version it was converted with;
+# compare it to the librknnrt runtime (2.3.x). A mismatch (e.g. a 2.1.0-converted
+# model on the 2.3.0 runtime) throws std::out_of_range in rknn_inputs_set.
+if [ -n "$VIS" ] && [ -f "$VIS" ]; then
+	rv="$(strings "$VIS" 2>/dev/null | grep -oE '"version":"[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+	case "$rv" in
+		"")    info "couldn't read the .rknn converter version (older format?) -- ensure it was built on rknn-toolkit2 2.3.x";;
+		2.3.*) ok "vision model converter rknn-toolkit2 $rv matches librknnrt 2.3.x";;
+		*)     bad "vision model converted with rknn-toolkit2 $rv, but the runtime is librknnrt 2.3.0 -- reconvert on 2.3.x (VISION.md), or it throws std::out_of_range in rknn_inputs_set";;
+	esac
+fi
+info "the LLM .rkllm must match librkllmrt 1.2.0 (checked by the runtime at load; a mismatch fails init)"
 
 # --- wifi (rk3576 aic8800) -------------------------------------------------
 hdr "Network (onboard wifi is optional -- ethernet always works)"
