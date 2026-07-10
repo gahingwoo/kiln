@@ -13,7 +13,14 @@
 // `#define STB_IMAGE_IMPLEMENTATION` before including this header.
 #pragma once
 #include "rknn_api.h"
+// stb's IMPLEMENTATION section isn't its own include-guarded, so if a TU pulls both
+// kiln_vision.h and kiln_detect.h it would compile stb twice. Guard the include so
+// whichever header is seen first pulls stb (and the STB_IMAGE_IMPLEMENTATION the TU
+// defined); the second skips it. Declarations are then already visible.
+#ifndef KILN_STB_INCLUDED
+#define KILN_STB_INCLUDED
 #include "stb_image.h"
+#endif
 #include "kiln_config.h"
 
 #include <cstdio>

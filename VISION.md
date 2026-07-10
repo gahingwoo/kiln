@@ -79,6 +79,49 @@ top-5 of 1000 classes  (NPU inference 5.9 ms):
 `rknn_mobilenet` next to `rkllm_demo`, installs `librknnrt.so`, and bakes the test
 image + labels. A `mobilenetv2-12_rk3576.rknn` in `model/` is baked to `/opt/models/`.
 
+## Object detection — EXPERIMENTAL foundation
+
+> **Status: experimental, NOT verified on hardware, OFF by default.** Kiln does not
+> claim working object detection. The pieces below are a *foundation* to build on.
+
+The vision path is **classification only** by default. A separate, experimental
+detection path (anchor-free **YOLOv8 / YOLO11**, DFL decode) lives in
+`buildroot/board/rock4d/kiln_detect.h`, kept apart from the classifier so the
+working classify path is untouched. It is enabled by `[vision] task = detect`.
+
+What's **verified** (host unit tests): the letterbox preprocessing + its inverse
+box mapping, IoU, and per-class NMS. What **needs on-board verification**: the
+YOLOv8/11 DFL decode itself — it mirrors `airockchip/rknn_model_zoo`
+(`examples/yolov8/cpp/postprocess.cc`) but has not been run against a real `.rknn`
+on a board, so it may produce wrong boxes.
+
+To try it (you supply the model — Kiln ships none):
+
+```ini
+[vision]
+task = detect
+model = /opt/models/yolov8n_rk3576.rknn      # a YOLOv8/11 .rknn (6 or 9 outputs)
+labels = /opt/models/coco_80_labels.txt      # COCO 80 classes, one per line
+conf_threshold = 0.25
+nms_iou = 0.45
+```
+
+Then `kiln-vision image.jpg` prints boxes (with an "experimental/unverified"
+banner), `kiln-serve` exposes `POST /v1/vision/detect`, and `kiln-config` →
+Vision lets you flip the task. Convert the `.rknn` the same way as classification
+(`rknn-toolkit2` **2.3.2**, on the board or an x86 host).
+
+**Licensing (important — Kiln bundles no models, you supply them):** Ultralytics
+**YOLOv5 / YOLOv8 / YOLO11 are AGPL-3.0**; deploying `kiln-serve` publicly with one
+may carry AGPL network-use obligations. **YOLOX is Apache-2.0** (permissive) and is
+a clean alternative if you want to avoid AGPL — though the current decode targets
+the v8/11 anchor-free head, so YOLOX (which keeps objectness) would need the small
+anchor-free-with-objectness variant of the decode.
+
+**To finish it** (roadmap): verify + tune the decode on-board against a known model
+and image; add the anchor-based (v5/v7) and YOLOX heads; the int8-gating speed
+optimization (the foundation reads floats for correctness); and box drawing/overlay.
+
 ## Why "control experiment"
 
 The open-driver (rocket) investigation was ultimately about getting a **conv** to

@@ -22,6 +22,7 @@
 #include "kiln_llm.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "kiln_vision.h"   // optional /v1/vision/classify (pulls in stb decoder)
+#include "kiln_detect.h"   // optional /v1/vision/detect (EXPERIMENTAL YOLOv8/11)
 
 #include <atomic>
 #include <memory>
@@ -122,28 +123,42 @@ int main(int argc, char **argv) {
     // Optional vision: only load it if the .rknn exists, so a box that only wants
     // the LLM doesn't pay for it (and it never crashes when absent).
     std::unique_ptr<KilnVision> vision;
+    std::unique_ptr<KilnDetect> detector;   // EXPERIMENTAL: [vision] task = detect
     {
         KilnConfig vc = cfg; vc.vision_model = cfg.server_vision();
         FILE *vf = fopen(vc.vision_model.c_str(), "rb");
         if (vf) {
             fclose(vf);
-            vision.reset(new KilnVision());
-            if (vision->init(vc) != 0) {
-                fprintf(stderr, "kiln-serve: vision disabled (%s)\n", vision->error());
-                vision.reset();
+            if (vc.vision_task == "detect") {
+                // the .rknn is a YOLO detector, not a classifier -> /v1/vision/detect
+                detector.reset(new KilnDetect());
+                if (detector->init(vc) != 0) {
+                    fprintf(stderr, "kiln-serve: detection disabled (%s)\n", detector->error());
+                    detector.reset();
+                } else {
+                    printf("kiln-serve: detection ready [EXPERIMENTAL, unverified] (%s)\n", vc.vision_model.c_str());
+                }
             } else {
-                printf("kiln-serve: vision ready (%s)\n", vc.vision_model.c_str());
+                vision.reset(new KilnVision());
+                if (vision->init(vc) != 0) {
+                    fprintf(stderr, "kiln-serve: vision disabled (%s)\n", vision->error());
+                    vision.reset();
+                } else {
+                    printf("kiln-serve: vision ready (%s)\n", vc.vision_model.c_str());
+                }
             }
         }
     }
 
-    if (!llm && !vision) {
+    if (!llm && !vision && !detector) {
         fprintf(stderr, "kiln-serve: neither an LLM (.rkllm) nor a vision (.rknn) model "
                         "was loadable. Check /etc/kiln/config.ini.\n");
         return 1;
     }
-    printf("kiln-serve: ready [%s%s]. Listening on http://%s:%d  (OpenAI /v1)\n",
-           llm ? "chat" : "", vision ? (llm ? "+vision" : "vision") : "",
+    printf("kiln-serve: ready [%s%s%s]. Listening on http://%s:%d  (OpenAI /v1)\n",
+           llm ? "chat" : "",
+           vision ? (llm ? "+classify" : "classify") : "",
+           detector ? ((llm || vision) ? "+detect" : "detect") : "",
            cfg.server_host.c_str(), cfg.server_port);
 
     httplib::Server srv;
@@ -253,6 +268,37 @@ int main(int argc, char **argv) {
         for (const auto &x : r) top.push_back({{"index", x.index}, {"label", x.label}, {"score", x.score}});
         res.set_content(json{{"model", vpath.substr(vpath.find_last_of('/') + 1)},
                              {"inference_ms", ms}, {"top", top}}.dump(), "application/json");
+    });
+
+    // EXPERIMENTAL object detection (config [vision] task = detect; YOLOv8/11).
+    // Same custom shape as classify: POST an image, get a list of boxes. UNVERIFIED
+    // on hardware -- boxes may be wrong. Disabled unless a detector loaded.
+    srv.Post("/v1/vision/detect", [&](const httplib::Request &req, httplib::Response &res) {
+        if (!detector) {
+            res.status = 503;
+            res.set_content("{\"error\":\"detection not enabled (set [vision] task=detect with a YOLOv8/11 .rknn)\"}", "application/json");
+            return;
+        }
+        std::string img = req.has_file("file") ? req.get_file_value("file").content : req.body;
+        if (img.empty()) {
+            res.status = 400;
+            res.set_content("{\"error\":\"no image; POST raw image bytes or multipart file=\"}", "application/json");
+            return;
+        }
+        float conf = req.has_param("conf") ? (float)atof(req.get_param_value("conf").c_str()) : cfg.vision_conf;
+        float iou  = req.has_param("iou")  ? (float)atof(req.get_param_value("iou").c_str())  : cfg.vision_nms_iou;
+        double ms = 0; std::string err;
+        auto dets = detector->detect_encoded((const unsigned char *)img.data(), (int)img.size(), conf, iou, &ms, &err);
+        if (dets.empty() && !err.empty()) {
+            res.status = 400; res.set_content(json{{"error", err}}.dump(), "application/json"); return;
+        }
+        std::string vpath = cfg.server_vision();
+        json objs = json::array();
+        for (const auto &o : dets)
+            objs.push_back({{"class_id", o.class_id}, {"label", o.label}, {"score", o.score},
+                            {"box", {o.box.x1, o.box.y1, o.box.x2, o.box.y2}}});
+        res.set_content(json{{"model", vpath.substr(vpath.find_last_of('/') + 1)},
+                             {"experimental", true}, {"inference_ms", ms}, {"objects", objs}}.dump(), "application/json");
     });
 
     if (!srv.listen(cfg.server_host.c_str(), cfg.server_port)) {

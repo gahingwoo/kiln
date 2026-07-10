@@ -179,29 +179,47 @@ vision_page() {
 	g() { kiln_ini_get "$CONF" vision "$1"; }
 	v_model=$(g model); v_labels=$(g labels); v_topn=$(g top_n)
 	v_core=$(g core_mask); v_prio=$(g priority)
+	v_task=$(g task); [ -n "$v_task" ] || v_task=classify
+	v_conf=$(g conf_threshold); [ -n "$v_conf" ] || v_conf=0.25
+	v_nms=$(g nms_iou); [ -n "$v_nms" ] || v_nms=0.45
 	MOD=0
 	while :; do
-		sel=$(menu "Vision Settings ([vision])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo 'classification only -- detection (YOLO) not supported')" \
+		sel=$(menu "Vision Settings ([vision])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo "task=$v_task (detect = EXPERIMENTAL, unverified)")" \
+			task       "$v_task  (classify | detect=EXPERIMENTAL)" \
 			model      "$(short "$v_model")" \
 			labels     "$(short "$v_labels")" \
-			top_n      "$v_topn" \
+			top_n      "$v_topn  (classify)" \
+			conf       "$v_conf  (detect score threshold)" \
+			nms_iou    "$v_nms  (detect NMS IoU)" \
 			core_mask  "$v_core" \
 			priority   "$v_prio" \
 			-          "----------------------------" \
 			SAVE       "write changes to $CONF" \
 			BACK       "discard & return") || { vis_maybe_back && return; continue; }
 		case "$sel" in
+			task)
+				n=$(radio_pick "Vision task:" "$v_task" classify detect)
+				if [ "$n" = detect ] && [ "$v_task" != detect ]; then
+					msg "task=detect is EXPERIMENTAL (YOLOv8/11) and UNVERIFIED on hardware -- boxes may be wrong. You supply a YOLOv8/11 .rknn (Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0). See VISION.md."
+				fi
+				setmod v_task "$n" ;;
 			model)
-				msg "Vision is CLASSIFICATION ONLY today (top-N ImageNet-style labels). Detection / YOLO is on the roadmap -- pick a classification .rknn (e.g. MobileNet)."
+				case "$v_task" in
+					detect) msg "Pick a YOLOv8/11 detection .rknn (EXPERIMENTAL). Convert one with rknn-toolkit2 2.3.2; see VISION.md." ;;
+					*)      msg "Classification: pick a classification .rknn (e.g. MobileNet). Detection is a separate task (set task=detect)." ;;
+				esac
 				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
-			labels)    edit_opt v_labels "Labels file (one class per line):" ;;
-			top_n)     n=$(input "How many top classes to print:" "$v_topn"); setmod v_topn "$n" ;;
+			labels)    edit_opt v_labels "Labels file (one per line; ImageNet-1000 for classify, COCO-80 for detect):" ;;
+			top_n)     n=$(input "How many top classes to print (classify):" "$v_topn"); setmod v_topn "$n" ;;
+			conf)      n=$(input "Detection score threshold 0-1 (task=detect):" "$v_conf"); setmod v_conf "$n" ;;
+			nms_iou)   n=$(input "Detection NMS IoU threshold 0-1 (task=detect):" "$v_nms"); setmod v_nms "$n" ;;
 			core_mask) n=$(radio_pick "NPU core mask (RK3576 has 2 cores):" "$v_core" auto 0 1 0_1); setmod v_core "$n" ;;
 			priority)  n=$(radio_pick "NPU scheduling priority:" "$v_prio" high medium low); setmod v_prio "$n" ;;
 			SAVE)
 				kiln_ini_set "$CONF" vision model "$v_model"; kiln_ini_set "$CONF" vision labels "$v_labels"
 				kiln_ini_set "$CONF" vision top_n "$v_topn"; kiln_ini_set "$CONF" vision core_mask "$v_core"
-				kiln_ini_set "$CONF" vision priority "$v_prio"
+				kiln_ini_set "$CONF" vision priority "$v_prio"; kiln_ini_set "$CONF" vision task "$v_task"
+				kiln_ini_set "$CONF" vision conf_threshold "$v_conf"; kiln_ini_set "$CONF" vision nms_iou "$v_nms"
 				MOD=0; msg "Saved to $CONF.\n\nApplies the next time you run kiln-vision / kiln-serve." ;;
 			BACK|"") vis_maybe_back && return ;;
 		esac

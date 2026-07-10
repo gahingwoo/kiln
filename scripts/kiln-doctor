@@ -105,6 +105,8 @@ hdr "Models (/etc/kiln/config.ini)"
 LLM="$(ini_get llm model)"
 VIS="$(ini_get vision model)"
 LAB="$(ini_get vision labels)"
+VTASK="$(ini_get vision task)"; [ -n "$VTASK" ] || VTASK=classify
+[ "$VTASK" = detect ] && warn "[vision] task = detect is EXPERIMENTAL (YOLOv8/11, unverified) -- boxes may be wrong; classify is the supported path"
 if [ -z "$LLM" ]; then
 	info "[llm] model is empty (vision-only setup) -- kiln-chat disabled"
 elif [ -f "$LLM" ]; then ok "LLM model present: $LLM"

@@ -11,6 +11,7 @@
 //   rknn_mobilenet <model.rknn> <image> [labels]   # explicit override (old form)
 #define STB_IMAGE_IMPLEMENTATION
 #include "kiln_vision.h"
+#include "kiln_detect.h"   // task = detect (EXPERIMENTAL YOLOv8/11); STB impl is this TU's
 #include "kiln_config.h"
 #include <cstdio>
 #include <string>
@@ -18,6 +19,27 @@
 static bool ends_with(const std::string &s, const char *suf) {
     std::string t = suf;
     return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
+}
+
+// EXPERIMENTAL object-detection path (config [vision] task = detect). Kept separate
+// from the classifier; prints an honest "unverified" banner -- Kiln does not claim
+// working detection (see kiln_detect.h / VISION.md).
+static int run_detect(KilnConfig &cfg, const std::string &image) {
+    fprintf(stderr,
+        "kiln-vision: task=detect is EXPERIMENTAL (YOLOv8/11, UNVERIFIED on hardware) --\n"
+        "             boxes may be wrong; see VISION.md. Use [vision] task=classify to disable.\n");
+    KilnDetect d;
+    if (d.init(cfg) != 0) { fprintf(stderr, "kiln-vision: %s\n", d.error()); return 1; }
+    double ms = 0; std::string err;
+    auto dets = d.detect_file(image, cfg.vision_conf, cfg.vision_nms_iou, &ms, &err);
+    if (dets.empty() && !err.empty()) { fprintf(stderr, "kiln-vision: %s\n", err.c_str()); return 1; }
+    printf("\n%zu detection(s)  (NPU inference %.1f ms, conf>=%.2f, nms=%.2f):\n",
+           dets.size(), ms, cfg.vision_conf, cfg.vision_nms_iou);
+    for (const auto &o : dets)
+        printf("  [%3d] %-22s %.2f   box (%.0f,%.0f)-(%.0f,%.0f)\n",
+               o.class_id, o.label.c_str(), o.score, o.box.x1, o.box.y1, o.box.x2, o.box.y2);
+    printf("[bench] rknn inference: %.1f ms (%.1f fps)\n", ms, ms > 0 ? 1000.0 / ms : 0.0);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -33,6 +55,9 @@ int main(int argc, char **argv) {
     } else {
         image = argc > 1 ? argv[1] : "/opt/models/test.jpg";
     }
+
+    // dispatch on the vision task; detect is the EXPERIMENTAL YOLOv8/11 path.
+    if (cfg.vision_task == "detect") return run_detect(cfg, image);
 
     KilnVision v;
     if (v.init(cfg) != 0) { fprintf(stderr, "kiln-vision: %s\n", v.error()); return 1; }

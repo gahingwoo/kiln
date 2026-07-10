@@ -48,7 +48,7 @@ Top menu:
 |---|---|
 | **Status & Diagnostics** | runs `kiln-doctor`, renders the ✓/✗ report, with a Re-run button |
 | **LLM Settings** | `[llm]` — model (picker), temperature, top_k/top_p, max_new_tokens, max_context_len, repeat_penalty, keep_history, system_prompt |
-| **Vision Settings** | `[vision]` — model (picker), labels, top_n, core_mask, priority |
+| **Vision Settings** | `[vision]` — task, model (picker), labels, top_n, core_mask, priority, and detection conf/nms |
 | **Server** | `[server]` host/port + `systemctl` control of `kiln-serve` |
 | **Models** | list / inspect (sizes, `.rknn` toolkit version), set the active LLM/vision model, add-from-path, remove |
 | **Advanced** | reload `rknpu`, rebuild the DKMS driver + restore wifi, re-run the installer — each behind a yes/no confirm |
@@ -61,7 +61,9 @@ Conventions:
   instead of typing a path.
 - **Enums are radio lists** — `core_mask` (`auto`/`0`/`1`/`0_1`), `priority`
   (`high`/`medium`/`low`), `keep_history` (`1`/`0`).
-- **Vision is classification-only** — the vision model picker says so; detection /
-  YOLO is not supported.
+- **Vision defaults to classification.** An **experimental** `task = detect`
+  (YOLOv8/11, unverified on hardware — boxes may be wrong) can be enabled on the
+  Vision page; the picker warns and points at [`../VISION.md`](../VISION.md). Kiln
+  does not claim working detection.
 - Most changes apply the **next time** you start `kiln-chat` / `kiln-vision` /
   `kiln-serve`; Advanced driver actions may need a reload or reboot (stated per action).
