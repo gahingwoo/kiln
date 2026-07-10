@@ -1,9 +1,25 @@
-# kiln-mainline.patch
+# driver/patches
 
-One patch against the pinned pristine vendor rknpu v0.9.8 source
-(`armbian/linux-rockchip` `rk-6.1-rkr6.1` `drivers/rknpu`). `fetch-vendor-driver.sh`
-pulls the GPL source; `apply-mainline-shims.sh` applies this patch. The vendor
-driver is not committed here — only Kiln's modifications (this patch) are.
+Kiln's modifications to the fetched vendor `rknpu` driver — the vendor source is not
+committed, only these are.
+
+- **`kiln-mainline.patch`** — the port + the RK3576 NPU-execution fixes (documented
+  below), one patch against the pinned pristine vendor rknpu v0.9.8 source
+  (`armbian/linux-rockchip` `rk-6.1-rkr6.1` `drivers/rknpu`).
+- **`add-regcmd-dump.py`** — a **debug probe** (not a fix): folds a one-shot
+  regcmd-dump hook into the fetched `rknpu_job.c` to capture a real inference's
+  per-task register recipe (used for the fp16 register-recipe work). Kept separate
+  from `kiln-mainline.patch` because it's a probe, not a shipped change; apply it and
+  build the module **directly** (not via DKMS, whose `PRE_BUILD` re-fetches a pristine
+  tree and would drop the hook).
+
+`fetch-vendor-driver.sh` pulls the GPL source; `apply-mainline-shims.sh` applies
+`kiln-mainline.patch`, plus two small supplementary shims it carries directly
+(deassert the RKNN core resets in `rknpu_power_on()` so early `GET_HW_VERSION` reads
+don't async-abort, and bail on a power-on failure instead of proceeding) — pending
+fold-in to the patch.
+
+## What kiln-mainline.patch changes
 
 It is deliberately a single, deterministic patch rather than a set of in-place
 regex edits: the source is pinned, so a patch reproduces the exact working

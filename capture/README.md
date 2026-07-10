@@ -47,6 +47,7 @@ difference is in the driver environment, and `env-trace.sh` catches it.
 | `capture.c` | the LD_PRELOAD shim (intercepts DRM `MEM_CREATE`/`SUBMIT`). |
 | `extract_regcmd.py` | decode a regcmd/`.rknn` blob into `tgt/reg/val` lines (diffs directly vs rocket's dump). |
 | `rknpu-regcmd-dump.patch` | optional kernel-side dump of the regcmd stream in `commit_pc` (apply to `driver/rknpu` + rebuild the module). Also the base for a `wtrace` fallback if the environment diff comes back identical (to catch a direct `ioremap+writel` the tracepoints miss). |
+| `wtrace-diff.py` | the `wtrace` fallback itself: decode + diff the vendor `rknpu` vs open `rocket` direct-`writel` (`ioremap`+`writel`) traces the regmap env-diff can't see, captured on the same dual-boot 7.1.3 image (`echo 1 > /sys/module/{rknpu,rocket}/parameters/...`). |
 
 ## Use
 

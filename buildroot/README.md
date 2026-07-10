@@ -7,10 +7,13 @@ the rocket driver turned off so only the vendor rknpu binds the NPU.
 ## What is validated vs what you run
 
 Validated on this dev machine (not just written):
-- `rknpu.ko` COMPILES against the target kernel (linux-next 7.1.0 / next-20260527,
-  arm64) in DRM_GEM mode via `driver/apply-mainline-shims.sh` (12 idempotent shims,
-  all found by actually compiling). Produces a 510 KB `.ko`, `vermagic` matching the
-  target kernel, `import_ns: DMA_BUF`, no `rk_dma_heap` symbols.
+- `rknpu.ko` COMPILES against a patched 7.1 arm64 tree in DRM_GEM mode via
+  `driver/apply-mainline-shims.sh`, which applies one deterministic patch
+  (`patches/kiln-mainline.patch`) plus two supplementary shims — see
+  [`../driver/patches/README.md`](../driver/patches/README.md). (Compile-validated on
+  a linux-next 7.1.0 / next-20260527 snapshot; the runtime target is mainline 7.1.3.)
+  Produces a ~510 KB `.ko`, `vermagic` matching the target kernel, `import_ns: DMA_BUF`,
+  no `rk_dma_heap` symbols.
 - The vendor `rockchip,rk3576-rknpu` node + IOMMUs are added to the in-tree
   `rockchip/rk3576-rock-4d` dtb by `kernel-patches/0004` (with a CRU fixed-rate NPU
   clock); the KERNEL_SRC tree must have `kernel-patches/` 0001-0010 applied.
@@ -33,20 +36,37 @@ nodes are removed at the DT level by the Kiln board DTS (`CUSTOM_DTS_PATH`).
 
 ## Files
 
-- `configs/kiln_rock4d_713_defconfig` — Kiln defconfig (mainline 7.1.3, rocket off, post-build).
+- `configs/kiln_rock4d_713_defconfig` — Kiln defconfig (mainline 7.1.3, rocket off,
+  post-build/post-image, `BR2_ROOTFS_OVERLAY=rootfs/`, ext4 `BR2_TARGET_ROOTFS_EXT2_SIZE=2560M`).
 - `npu.fragment` — kernel fragment: `# CONFIG_DRM_ACCEL_ROCKET is not set` + deps.
-- `board/rock4d/post-build.sh` — builds+installs `rknpu.ko` against the built kernel,
-  installs the runtimes, installs an `S89rknpu` init that `modprobe rknpu` at boot.
-- `board/rock4d/post-image.sh` — packs `sdcard.img` (16 MiB u-boot + FAT32 boot +
-  ext4 rootfs) with the Kiln DTB.
-- `fetch-runtimes.sh` — fetches the version-locked closed `.so` blobs into `dl/`.
+- `board/rock4d/` — the userspace sources compiled into the image (`rkllm_chat.cpp`,
+  `rknn_mobilenet.cpp`, `kiln_serve.cpp`, and the shared headers `kiln_config.h` /
+  `kiln_llm.h` / `kiln_vision.h`), plus the build hooks:
+  - `post-build.sh` — builds `rknpu.ko` (+ `depmod`); installs the runtimes
+    (`librkllmrt` / `librknnrt` / `libgomp.so.1`); cross-builds the `rkllm_demo` and
+    `rknn_mobilenet` demos; installs `kiln-doctor` + `kiln-config` (from `scripts/`)
+    and `kiln-env-trace` (from `capture/`); adds an `S89rknpu` init that `modprobe`s
+    rknpu at boot; bakes the vision assets (test image + labels, and the `.rknn` if
+    present in `model/`).
+  - `post-image.sh` — packs `sdcard.img` (16 MiB u-boot + FAT32 boot + ext4 rootfs)
+    with the Kiln DTB.
+- `rootfs/` — the `BR2_ROOTFS_OVERLAY`: ships `usr/bin/kiln-chat`, `usr/bin/kiln-vision`,
+  the `kiln-serve.service` unit, and the login MOTD (`etc/profile.d/kiln-motd.sh`).
+- `fetch-runtimes.sh` — fetches the version-locked closed `.so` blobs + demo headers
+  into `dl/` (idempotent).
+- `fetch-vision-assets.sh` — fetches the MobileNet test image + ImageNet labels (and
+  optionally a pre-converted `.rknn` via `KILN_MODELS_URL`) into `model/`; idempotent,
+  so installer phase 1 can pre-cache it for an offline phase 2.
 - `build-image.sh` — orchestrator (set 4 paths, one command).
-- `dl/` — build-time fetch cache (closed `.so` + `base.config`); not source, do not commit.
+- `dl/` — build-time fetch cache: closed `.so` blobs + `libgomp.so.1` + demo headers
+  (`rkllm.h`, `rknn_api.h`, `stb_image.h`) + kiln-serve's `httplib.h` / `json.hpp` +
+  `llm_demo.cpp` + `base.config`. Not source; do not commit.
 
-## The model (668 MB) is not baked in by default
+## Models are not baked in by default
 
-`rootfs` is 768 MiB (libs + `rknpu.ko` + headroom). The 668 MB
-`TinyLlama-1.1B-Chat-v1.0-rk3576-w4a16.rkllm` is left out to keep the image small and
-the rebuild fast; `scp` it to `/opt/models` on the board .
-To bake it in instead: `KILN_BAKE_MODEL=1 ./buildroot/build-image.sh` and raise
-`BR2_TARGET_ROOTFS_EXT2_SIZE` to ~1536M in the defconfig.
+The rootfs is sized **2560M** in the defconfig (libs + `rknpu.ko` + headroom — enough
+for a baked ~1.4 GB LLM). By default `post-build.sh` bakes only the small vision assets
+(test image + labels, and a `mobilenetv2-12_rk3576.rknn` **if you dropped one in
+`model/`**); the large LLM `.rkllm` is baked only with `KILN_BAKE_MODEL=1
+./buildroot/build-image.sh`. Kiln ships no models — put a `*.rkllm` / `*.rknn` in
+`model/` to bake, or `scp` them to `/opt/models` on the board.

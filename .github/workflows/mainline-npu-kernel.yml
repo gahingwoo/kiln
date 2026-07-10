@@ -1,8 +1,8 @@
 name: mainline-npu-kernel
 
 # Build a mainline linux-7.1.3 kernel for the Radxa ROCK 4D (RK3576) with
-# Kiln's NPU patches (kernel-patches 0001 + 0003 + 0004) -- no Armbian kernel
-# patches. Built natively on a free arm64 GH runner; published as bindeb-pkg .debs.
+# Kiln's NPU patches (kernel-patches 0001-0010) -- no Armbian kernel patches.
+# Built natively on a free arm64 GH runner; published as bindeb-pkg .debs.
 #
 # Trigger: Actions tab -> "mainline-npu-kernel" -> Run workflow.
 
