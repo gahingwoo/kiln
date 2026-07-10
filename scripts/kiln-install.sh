@@ -556,6 +556,12 @@ else
 	done
 fi
 
+# Diagnostic + config CLIs. Installed UNCONDITIONALLY (tiny, and useful even on a
+# KILN_SKIP_RUNTIMES run) so `kiln-doctor` / `kiln-config` are always on PATH.
+for t in kiln-doctor kiln-config; do
+	[ -f "scripts/$t" ] && $SUDO install -m0755 "scripts/$t" "/usr/bin/$t" || true
+done
+
 # Seed the unified config (if absent) so kiln-chat/vision/serve/settings share
 # one source of truth. The tools also work with no file (built-in defaults);
 # this just makes the vision model SoC-correct and seeds a working config.

@@ -1,0 +1,139 @@
+#!/bin/sh
+# kiln-doctor -- health check for a Kiln install (LLM + vision on the RK3576 NPU).
+# Prints a plain-English ✓/✗ report and exits NON-ZERO if any CRITICAL check fails,
+# so it is scriptable and is the "paste this before opening an issue" tool. It is
+# also the engine behind kiln-config's Status page.
+#
+# Usage:  kiln-doctor            full report
+#         kiln-doctor -q         quiet: only failures + the final verdict
+# Reads /etc/kiln/config.ini (override with $KILN_CONFIG).
+
+CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
+QUIET=0; [ "${1:-}" = "-q" ] && QUIET=1
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+
+# colour only on a tty
+if [ -t 1 ]; then C_G=$(printf '\033[32m'); C_R=$(printf '\033[31m'); C_Y=$(printf '\033[33m'); C_D=$(printf '\033[2m'); C_0=$(printf '\033[0m'); else C_G=; C_R=; C_Y=; C_D=; C_0=; fi
+
+CRIT=0   # count of failed critical checks -> exit code
+WARN=0
+
+ok()   { [ "$QUIET" = 1 ] || printf '  %s✓%s %s\n'  "$C_G" "$C_0" "$*"; }
+bad()  { printf '  %s✗%s %s\n'  "$C_R" "$C_0" "$*"; CRIT=$((CRIT+1)); }
+warn() { printf '  %s!%s %s\n'  "$C_Y" "$C_0" "$*"; WARN=$((WARN+1)); }
+info() { [ "$QUIET" = 1 ] || printf '  %s·%s %s\n'  "$C_D" "$C_0" "$*"; }
+hdr()  { [ "$QUIET" = 1 ] || printf '\n%s%s%s\n' "$C_D" "$*" "$C_0"; }
+
+# compact INI reader: ini_get SECTION KEY  (prints the value; strips inline # comment)
+ini_get() {
+	[ -f "$CONF" ] || return 0
+	awk -v s="$1" -v k="$2" '
+		/^[ \t]*\[.*\][ \t]*$/ { h=$0; sub(/^[ \t]*\[/,"",h); sub(/\][ \t]*$/,"",h); t=(h==s); next }
+		t { if (match($0,/^[ \t]*[^=]*=/)) { n=substr($0,1,RLENGTH-1); gsub(/^[ \t]+|[ \t]+$/,"",n);
+		    if (n==k) { v=substr($0,RLENGTH+1); sub(/[ \t]#.*$/,"",v); gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit } } }
+	' "$CONF"
+}
+
+sover() { # print a version string found in a .so, or "?"
+	v=$(strings "$1" 2>/dev/null | grep -m1 "$2" || true); printf '%s' "${v:-?}"
+}
+
+printf '%s=== kiln-doctor -- RK3576 NPU health ===%s\n' "$C_D" "$C_0"
+
+# --- kernel + install status ----------------------------------------------
+hdr "Kernel & install"
+KREL="$(uname -r)"
+if [ -f /etc/kiln/patched-kernel ] && [ "$KREL" = "$(sed -n 1p /etc/kiln/patched-kernel 2>/dev/null)" ]; then
+	ok "running the Kiln patched kernel ($KREL)"
+else
+	warn "running '$KREL', not the recorded Kiln kernel -- NPU needs the Kiln mainline kernel (see MAINLINE-KERNEL.md)"
+fi
+if [ -f /etc/kiln/phase2-failed ]; then
+	bad "phase-2 install FAILED -- see /var/log/kiln-phase2.log, then re-run: sudo bash /opt/kiln/scripts/kiln-install.sh"
+elif [ -f /etc/kiln/phase2-done ]; then
+	ok "phase-2 install completed"
+else
+	info "no phase-2 marker (older install, or phase 2 not run yet)"
+fi
+
+# --- driver ----------------------------------------------------------------
+hdr "NPU driver (rknpu)"
+if grep -q '^rknpu' /proc/modules 2>/dev/null; then
+	drv="$(modinfo rknpu 2>/dev/null | awk '/^version:/{print $2}')"
+	ok "rknpu loaded${drv:+ (v$drv)}"
+else
+	bad "rknpu NOT loaded -- load it: sudo modprobe rknpu   (auto-loads at boot via /etc/modules-load.d/rknpu.conf)"
+fi
+rn="$(ls /dev/dri/renderD* 2>/dev/null | head -1)"
+if [ -n "$rn" ]; then ok "render node present ($rn)"; else bad "no /dev/dri/renderD* render node -- the NPU won't be reachable"; fi
+
+# --- MMU banks (the RK3576 two-IOMMU fix) ---------------------------------
+hdr "NPU MMU state (dmesg)"
+DMESG="$($SUDO dmesg 2>/dev/null || true)"
+if [ -z "$DMESG" ]; then
+	info "can't read dmesg (try: sudo kiln-doctor) -- skipping MMU checks"
+else
+	if printf '%s\n' "$DMESG" | grep -qi 'failed to get pm runtime for npu0.*-110'; then
+		bad "'failed to get pm runtime for npu0, ret: -110' in dmesg -- NPU power domain wedged (missing regulator-always-on; see kernel-patches/0010)"
+	fi
+	mmu="$(printf '%s\n' "$DMESG" | grep -i 'mmu enable_all' | tail -1)"
+	if [ -n "$mmu" ]; then
+		if printf '%s' "$mmu" | grep -q 'st=0x19/0x19/0x19/0x19'; then
+			ok "all four MMU banks enabled (st=0x19/0x19/0x19/0x19)"
+		else
+			warn "MMU enable_all present but state is not 0x19/0x19/0x19/0x19: $(printf '%s' "$mmu" | sed 's/.*mmu/mmu/')"
+		fi
+	else
+		info "no 'mmu enable_all' line yet (runs on first NPU use; try after kiln-vision/kiln-chat)"
+	fi
+fi
+
+# --- runtimes --------------------------------------------------------------
+hdr "Runtimes"
+if [ -f /usr/lib/librkllmrt.so ]; then ok "librkllmrt.so  $(sover /usr/lib/librkllmrt.so 'RKLLM SDK (version')"; else warn "librkllmrt.so missing in /usr/lib (LLM path unavailable)"; fi
+if [ -f /usr/lib/librknnrt.so ]; then ok "librknnrt.so   $(sover /usr/lib/librknnrt.so 'librknnrt version')"; else warn "librknnrt.so missing in /usr/lib (vision path unavailable)"; fi
+
+# --- tools -----------------------------------------------------------------
+hdr "Tools"
+for t in kiln-chat kiln-vision kiln-config rkllm_demo rknn_mobilenet; do
+	if command -v "$t" >/dev/null 2>&1; then ok "$t"; else warn "$t not installed in PATH"; fi
+done
+
+# --- models ----------------------------------------------------------------
+hdr "Models (/etc/kiln/config.ini)"
+[ -f "$CONF" ] || warn "no $CONF -- tools fall back to built-in defaults"
+LLM="$(ini_get llm model)"
+VIS="$(ini_get vision model)"
+LAB="$(ini_get vision labels)"
+if [ -z "$LLM" ]; then
+	info "[llm] model is empty (vision-only setup) -- kiln-chat disabled"
+elif [ -f "$LLM" ]; then ok "LLM model present: $LLM"
+else bad "LLM model MISSING: $LLM -- put a *-rk3576-w4a16.rkllm there, or fix it in kiln-config"; fi
+if [ -z "$VIS" ]; then
+	warn "[vision] model is empty"
+elif [ -f "$VIS" ]; then ok "vision model present: $VIS"
+else bad "vision model MISSING: $VIS -- convert a MobileNet .rknn (see VISION.md) or fix it in kiln-config"; fi
+if [ -n "$LAB" ] && [ ! -f "$LAB" ]; then warn "vision labels file missing: $LAB"; fi
+info "models must match the runtime version (librknnrt 2.3.0 / librkllmrt 1.2.0); a mismatch throws std::out_of_range in rknn_inputs_set"
+
+# --- wifi (rk3576 aic8800) -------------------------------------------------
+hdr "Network (onboard wifi is optional -- ethernet always works)"
+if [ -d /sys/class/net ]; then
+	wl="$(ls -d /sys/class/net/wl* 2>/dev/null | head -1)"
+	if [ -n "$wl" ]; then ok "wireless interface present ($(basename "$wl"))"
+	elif lsmod 2>/dev/null | grep -q aic8800; then info "aic8800 module loaded but no wlan iface yet"
+	else info "no onboard wifi up (aic8800). If you need it, phase 2 rebuilds it; else use ethernet."; fi
+fi
+
+# --- verdict ---------------------------------------------------------------
+printf '\n'
+if [ "$CRIT" -gt 0 ]; then
+	printf '%sFAIL%s -- %d critical issue(s), %d warning(s). Fix the ✗ items above.\n' "$C_R" "$C_0" "$CRIT" "$WARN"
+	exit 1
+elif [ "$WARN" -gt 0 ]; then
+	printf '%sOK with warnings%s -- %d warning(s). The NPU core looks healthy.\n' "$C_Y" "$C_0" "$WARN"
+	exit 0
+else
+	printf '%sALL GOOD%s -- Kiln looks healthy.\n' "$C_G" "$C_0"
+	exit 0
+fi
