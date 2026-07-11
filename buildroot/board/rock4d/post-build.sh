@@ -126,11 +126,17 @@ mkdir -p "$TARGET_DIR/opt/models"
 [ -f "$KILN/model/mobilenetv2-12_rk3576.rknn" ] \
 	&& install -m0644 "$KILN/model/mobilenetv2-12_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenetv2-12_rk3576.rknn" \
 	&& echo "[kiln] baked mobilenetv2-12_rk3576.rknn into /opt/models/"
-# LLM model (large, ~1.4 GB) only when KILN_BAKE_MODEL=1
+# LLM model (large, ~1.4 GB) only when KILN_BAKE_MODEL=1. Bakes the first *.rkllm
+# found in model/ -- you supply it; no specific model is hardcoded (kiln-chat
+# auto-discovers whatever .rkllm is in /opt/models).
 if [ "${KILN_BAKE_MODEL:-0}" = "1" ]; then
-	M="$KILN/model/Qwen2.5-1.5B-rk3576-w4a16.rkllm"
-	[ -f "$M" ] && install -D -m0644 "$M" "$TARGET_DIR/opt/models/$(basename "$M")" \
-		&& echo "[kiln] baked LLM model into /opt/models/ (image ~1.4 GB larger)"
+	M="$(ls "$KILN"/model/*.rkllm 2>/dev/null | head -1)"
+	if [ -n "$M" ] && [ -f "$M" ]; then
+		install -D -m0644 "$M" "$TARGET_DIR/opt/models/$(basename "$M")" \
+			&& echo "[kiln] baked $(basename "$M") into /opt/models/ (image ~1.4 GB larger)"
+	else
+		echo "[kiln] KILN_BAKE_MODEL=1 but no *.rkllm in $KILN/model/ -- nothing baked"
+	fi
 else
 	echo "[kiln] LLM model NOT baked in; scp it to /opt/models on the board"
 fi

@@ -20,8 +20,12 @@ mainline**: those ten patches are required (see *Why it needs kernel patches*).
 
 ## Is this for you?
 
-- **You have** a Radxa **ROCK 4D (RK3576)** — or a **ROCK 3B (RK3568)**, vision-only
-  and untested (help wanted) — running **Armbian**.
+- **You have** any **RK3576** device that can run a mainline kernel — the module,
+  runtimes, and tools are **board-agnostic** (the NPU IP is the same silicon). The
+  one-command **Armbian** installer is **tested on the Radxa ROCK 4D**; another RK3576
+  board works the same way once its board DTB carries the NPU node + the `vdd_npu`
+  regulator fix (see *Why it needs kernel patches*). Initial **RK3568** (ROCK 3B,
+  vision-only) support is in but **untested** — help wanted.
 - **You want** local **LLM + vision** inference on the NPU on a **mainline** kernel,
   not the vendor 6.1 BSP.
 - **You get** one command → `kiln-chat`, `kiln-vision`, `kiln-serve` (OpenAI-compatible
@@ -66,7 +70,8 @@ fixes are kernel code the out-of-tree module and a DT overlay cannot supply:
   ROCK 4D board DTS marks the NPU rail `vdd_npu_s0` only `regulator-boot-on`, so it
   is disabled ~30 s into boot — the **second** inference then reads a dead rail and
   wedges the board. One line, `regulator-always-on` (`kernel-patches/0010`), fixes
-  the "works once then hangs" bug.
+  the "works once then hangs" bug. (This one is per-board: another RK3576 board's DTB
+  needs the same one-line fix on its own NPU rail — the driver/runtime side is common.)
 
 Full write-ups: [`kernel-patches/README.md`](kernel-patches/README.md) (the 10
 patches, per-patch rationale) and [`driver/patches/README.md`](driver/patches/README.md)

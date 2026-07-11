@@ -31,8 +31,12 @@ buildroot build compiles its own toolchain + the kernel, ~40-90 min first run):
 
 `build-image.sh` reuses the rocket tree's buildroot source and the linux-next tree
 that already carries the RK3576 IOMMU/PD/clock platform patches. It changes nothing
-under /home/parallels: rocket is disabled by `npu.fragment`, and the rocket NPU DT
-nodes are removed at the DT level by the Kiln board DTS (`CUSTOM_DTS_PATH`).
+in those reference trees (they live under `$KILN_REF_ROOT`, outside this repo):
+rocket is disabled by `npu.fragment` (`CONFIG_DRM_ACCEL_ROCKET` builds in but idles
+with no `rknn_core` node to bind), and the KILN dtb (`rk3576-rock-4d`) simply does not
+carry the rocket NPU node — it is compiled out of that dtb at the DT-source level — so
+the out-of-tree vendor `rknpu.ko` owns `npu@27700000` there. The separate `-rocket`
+dtb keeps the rocket node for the dual-image boot menu.
 
 ## Files
 
