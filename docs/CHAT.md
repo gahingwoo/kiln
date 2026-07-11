@@ -9,6 +9,9 @@ The input line has cursor editing and history (via readline): backspace, left/
 right/Home/End, up/down to recall earlier prompts, and correct UTF-8 so non-ASCII
 input edits properly. (Without libreadline at build it falls back to a plain read.)
 
+**Tip:** type a lone **`/`** and press Enter to open an arrow-key menu of the commands
+below — no need to remember them or run `/help` first.
+
 It runs any RKLLM `.rkllm` model; the chat template and stop tokens are picked
 from the model name — **Llama-3** (`<|start_header_id|>…<|eot_id|>`) vs
 **Qwen / ChatML** (`<|im_start|>…<|im_end|>`) — so switching models Just Works.

@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-in
   `kiln-serve`——OpenAI 兼容 API);外加 `kiln-config`(TUI)、`kiln-convert`(板上转模型)、
   `kiln-doctor`(健康检查)。
 - **不适合你** 如果你要留在厂商 **6.1 BSP** 内核上。视觉主要是**图像分类**(MobileNet);
-  **目标检测(YOLO)**能用但较新、测的模型少——见 [`docs/VISION.md`](docs/VISION.md)。
+  **目标检测(YOLO)**能用但较新、测的模型少——见 [视觉](docs/zh/VISION.md)。
 
 ## 现状
 
@@ -87,7 +87,7 @@ Kiln **不附带**任何模型——你自备(和厂商栈一样)。但你不需
   `kiln-chat` 会自动发现那里的任意 `.rkllm`。
 - **视觉** —— `kiln-convert mobilenet` 在板上现构建一个分类器 `.rknn`(或 `kiln-convert yolov8n`
   一个 YOLO 检测器);它把 `rknn-toolkit2` 锁到 `librknnrt` **2.3.x** 运行时。也可在 x86 上转好后
-  丢进 `/opt/models`。见 [`docs/VISION.md`](docs/VISION.md)。
+  丢进 `/opt/models`。见 [视觉](docs/zh/VISION.md)。
 
 ## 出问题了?
 

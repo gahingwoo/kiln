@@ -17,11 +17,18 @@ sudo kiln-config        # Server → host = 0.0.0.0(所有网卡),然后 service
 kiln-serve --host 0.0.0.0 --port 8080
 ```
 
-`host = 0.0.0.0` 很关键——`127.0.0.1` 只接受板子自己的连接。从局域网另一台机器验证:
+`host = 0.0.0.0` 很关键——`127.0.0.1` 只接受板子自己的连接(`kiln-doctor` 会在设成这样时报警)。
 
-```sh
-curl http://<板子IP>:8080/v1/models
+**你不用去查板子的 IP。** `kiln-serve` 启动时会把填好 IP 的连接串直接打出来:
+
 ```
+kiln-serve: ready [chat+classify]. Listening on http://0.0.0.0:8080  (OpenAI /v1)
+  -> Open WebUI / OpenAI:  OPENAI_API_BASE_URL=http://192.168.1.42:8080/v1   (API key: any)
+  -> test:                 curl http://192.168.1.42:8080/v1/models
+```
+
+同样的信息在 **`kiln`** 菜单 → **Connect a web UI** 里一键可见(base URL + 填好 IP 的
+`docker run`),`kiln-doctor` 也会打印。直接从那里抄,别用下面的 `<板子IP>` 占位符。
 
 ## 2. Open WebUI(ChatGPT 式网页)
 
