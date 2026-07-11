@@ -32,7 +32,9 @@ EXT="$KILN/buildroot"
 OUT="${OUT:-$KILN/br-out}"                # writable buildroot output (in-tree, not under the read-only refs)
 export ROCKCHIP_BINARIES
 
-for p in "$BR_SRC/Makefile" "$KERNEL_SRC/Makefile" "$BASE_CONFIG" "$ROCKCHIP_BINARIES/rock4d-sd-uboot.img"; do
+# UBOOT_IMG_NAME defaults to the rock4d image; a rock5b build passes
+# UBOOT_IMG_NAME=rock5b-sd-uboot.img (post-image.sh consumes UBOOT_IMG itself).
+for p in "$BR_SRC/Makefile" "$KERNEL_SRC/Makefile" "$BASE_CONFIG" "$ROCKCHIP_BINARIES/${UBOOT_IMG_NAME:-rock4d-sd-uboot.img}"; do
 	[ -e "$p" ] || { echo "ERROR: not found: $p (edit the paths at the top of $0)"; exit 1; }
 done
 

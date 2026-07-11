@@ -136,10 +136,14 @@ mkdir -p "$TARGET_DIR/opt/models"
 [ -f "$KILN/model/test.jpg" ]            && install -m0644 "$KILN/model/test.jpg"            "$TARGET_DIR/opt/models/test.jpg"
 [ -f "$KILN/model/imagenet_labels.txt" ] && install -m0644 "$KILN/model/imagenet_labels.txt" "$TARGET_DIR/opt/models/imagenet_labels.txt"
 [ -f "$KILN/model/coco_80_labels.txt" ]  && install -m0644 "$KILN/model/coco_80_labels.txt"  "$TARGET_DIR/opt/models/coco_80_labels.txt"
-# MobileNet .rknn (small, ~6 MB) for the vision control experiment
-[ -f "$KILN/model/mobilenetv2-12_rk3576.rknn" ] \
-	&& install -m0644 "$KILN/model/mobilenetv2-12_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenetv2-12_rk3576.rknn" \
-	&& echo "[kiln] baked mobilenetv2-12_rk3576.rknn into /opt/models/"
+# MobileNet .rknn (small, ~6 MB) for the vision control experiment. The default
+# is the RK3576-built model; KILN_VISION_RKNN overrides it (an .rknn is target-
+# platform-specific, so the rock5b post-build passes an rk3588 name instead). If
+# the named file is absent, nothing is baked -- convert on-board with kiln-convert.
+VISION_RKNN="${KILN_VISION_RKNN:-mobilenetv2-12_rk3576.rknn}"
+[ -f "$KILN/model/$VISION_RKNN" ] \
+	&& install -m0644 "$KILN/model/$VISION_RKNN" "$TARGET_DIR/opt/models/$VISION_RKNN" \
+	&& echo "[kiln] baked $VISION_RKNN into /opt/models/"
 # LLM model (large, ~1.4 GB) only when KILN_BAKE_MODEL=1. Bakes the first *.rkllm
 # found in model/ -- you supply it; no specific model is hardcoded (kiln-chat
 # auto-discovers whatever .rkllm is in /opt/models).

@@ -43,6 +43,7 @@ is **testing on a board other than the ROCK 4D** and reporting back.
 | doc | board |
 |---|---|
 | [RK3568.md](RK3568.md) | RK3568 / Radxa ROCK 3B — vision-only, untested on hardware (help wanted). |
+| [RK3588.md](RK3588.md) | RK3588 / Radxa ROCK 5B — LLM + vision, skeleton only (DTB compiles, not yet built/tested; help wanted). |
 
 ## Internals (NPU bring-up)
 

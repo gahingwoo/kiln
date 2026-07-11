@@ -202,7 +202,8 @@ adds / removes models, and `kiln-doctor` checks a model is present and version-m
   with a rationale README), `compat/` (BSP-only `soc/rockchip/*` stubs)
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM; DKMS)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build);
-  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see [`docs/RK3568.md`](docs/RK3568.md))
+  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see [`docs/RK3568.md`](docs/RK3568.md));
+  `kernel-patches-rk3588/` — RK3588 / ROCK 5B (skeleton; DTB compiles, not built/tested; see [`docs/RK3588.md`](docs/RK3588.md))
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`

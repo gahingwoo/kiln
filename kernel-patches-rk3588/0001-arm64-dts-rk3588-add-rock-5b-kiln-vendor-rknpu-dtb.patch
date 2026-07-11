@@ -1,0 +1,127 @@
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Fri, 11 Jul 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: rockchip: add rk3588-rock-5b-kiln (vendor rknpu)
+
+SKELETON, NOT hardware-validated. Adds a Kiln variant of the Radxa ROCK 5B DTB
+that binds the RK3588 NPU to the out-of-tree vendor rknpu (v0.9.8) driver instead
+of the in-tree open accel/rocket driver.
+
+Unlike RK3576 (where mainline has no NPU compute node and Kiln adds one), mainline
+rk3588-base.dtsi already describes the NPU as three rockchip,rk3588-rknn-core
+nodes (npu@fdab0000/fdac0000/fdad0000) for accel/rocket, and rk3588-rock-5b.dtsi
+enables them. The closed librkllmrt / librknnrt runtimes speak the vendor rknpu
+ioctl ABI, which needs a SINGLE rockchip,rk3588-rknpu node (core_mask=0x7 in the
+driver's rk3588_rknpu_config). The two drivers cannot share the NPU MMIO, so this
+DTB removes rknn_core_1/2 and reshapes rknn_core_0 (npu@fdab0000) into the vendor
+node, then enables the three shared rockchip-iommu banks (rknn_mmu_0/1/2).
+
+The node's reg/interrupts/power-domains/resets/clocks are taken from the verified
+mainline rknn_core_0/1/2 resources (same silicon); npu-supply/sram-supply
+(vdd_npu_s0) are inherited from rk3588-rock-5b.dtsi. The remaining vendor-BSP
+specifics are marked TODO(bsp) and MUST be reconciled against a real RK3588 vendor
+rknpu node before this binds and runs correctly:
+  - reg span/count (per-core 0x9000 span is the RK3576-vendor pattern),
+  - clk_npu route: mainline uses &scmi_clk SCMI_CLK_NPU; the RK3576 Kiln port had
+    to swap SCMI for a CRU clock (firmware clamp),
+  - operating-points-v2 (rates/microvolt),
+  - nvmem-cells for leakage (rk3588_npu_get_soc_info reads RK3588M/J bins).
+
+Verified: applies to mainline 7.1.3 and rk3588-rock-5b-kiln.dtb compiles (dtc)
+with a single rockchip,rk3588-rknpu node and no rknn-core nodes. NOT verified: it
+powers on, probes, or runs a conv on real ROCK 5B hardware.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -204,6 +204,7 @@
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-roc-rt.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5-itx.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5b.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5b-kiln.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5b-pcie-ep.dtbo
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5b-pcie-srns.dtbo
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-rock-5b-plus.dtb
+--- /dev/null
++++ b/arch/arm64/boot/dts/rockchip/rk3588-rock-5b-kiln.dts
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/dts-v1/;
++
++#include "rk3588-rock-5b.dtsi"
++
++/*
++ * Kiln variant of the Radxa ROCK 5B device tree.
++ *
++ * Kiln runs the closed librkllmrt / librknnrt runtimes, which speak the vendor
++ * rknpu ioctl ABI and need the out-of-tree vendor rknpu (v0.9.8) driver bound to
++ * a SINGLE rockchip,rk3588-rknpu node. Mainline instead drives this NPU with the
++ * open accel/rocket driver via three rknn_core nodes (enabled by the stock
++ * rk3588-rock-5b.dtsi). The two drivers cannot share the NPU MMIO, so this DTB
++ * removes the three rocket cores and reshapes core 0's node into the vendor node.
++ *
++ * SKELETON -- NOT hardware-validated. The vendor-BSP specifics (reg span/count,
++ * clk_npu route SCMI-vs-CRU, OPP table, leakage nvmem) are TODO(bsp) and must be
++ * reconciled against a real RK3588 vendor rknpu node before this binds and runs
++ * correctly. Until then the node is shaped from the verified mainline
++ * rknn_core_0/1/2 resources in rk3588-base.dtsi (same silicon).
++ */
++
++/ {
++	model = "Radxa ROCK 5B (Kiln vendor rknpu NPU)";
++	compatible = "radxa,rock-5b", "rockchip,rk3588";
++};
++
++/* Remove the open accel/rocket NPU cores 1 and 2; core 0 is reshaped below. */
++/delete-node/ &rknn_core_1;
++/delete-node/ &rknn_core_2;
++
++/*
++ * Reshape rknn_core_0's node (npu@fdab0000) into the vendor single-node NPU.
++ * npu-supply / sram-supply (= vdd_npu_s0) are inherited from rk3588-rock-5b.dtsi.
++ */
++&rknn_core_0 {
++	compatible = "rockchip,rk3588-rknpu";
++	/delete-property/ reg-names;
++	/* TODO(bsp): confirm reg span/count vs the vendor rknpu node. */
++	reg = <0x0 0xfdab0000 0x0 0x9000>,
++	      <0x0 0xfdac0000 0x0 0x9000>,
++	      <0x0 0xfdad0000 0x0 0x9000>;
++	interrupts = <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH 0>,
++		     <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH 0>,
++		     <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH 0>;
++	interrupt-names = "npu0_irq", "npu1_irq", "npu2_irq";
++	/* Driver uses devm_clk_bulk_get_all(). TODO(bsp): SCMI vs CRU npu clock. */
++	clocks = <&cru ACLK_NPU0>, <&cru HCLK_NPU0>,
++		 <&cru ACLK_NPU1>, <&cru HCLK_NPU1>,
++		 <&cru ACLK_NPU2>, <&cru HCLK_NPU2>,
++		 <&scmi_clk SCMI_CLK_NPU>, <&cru PCLK_NPU_ROOT>;
++	clock-names = "aclk0", "hclk0", "aclk1", "hclk1",
++		      "aclk2", "hclk2", "npu", "pclk";
++	assigned-clocks = <&scmi_clk SCMI_CLK_NPU>;
++	assigned-clock-rates = <200000000>;
++	resets = <&cru SRST_A_RKNN0>, <&cru SRST_H_RKNN0>,
++		 <&cru SRST_A_RKNN1>, <&cru SRST_H_RKNN1>,
++		 <&cru SRST_A_RKNN2>, <&cru SRST_H_RKNN2>;
++	reset-names = "srst_a0", "srst_h0", "srst_a1", "srst_h1",
++		      "srst_a2", "srst_h2";
++	power-domains = <&power RK3588_PD_NPUTOP>,
++			<&power RK3588_PD_NPU1>,
++			<&power RK3588_PD_NPU2>;
++	power-domain-names = "npu0", "npu1", "npu2";
++	iommus = <&rknn_mmu_0>, <&rknn_mmu_1>, <&rknn_mmu_2>;
++	/* TODO(bsp): operating-points-v2, nvmem-cells (leakage). */
++	status = "okay";
++};
++
++&rknn_mmu_0 {
++	status = "okay";
++};
++
++&rknn_mmu_1 {
++	status = "okay";
++};
++
++&rknn_mmu_2 {
++	status = "okay";
++};

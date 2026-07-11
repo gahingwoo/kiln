@@ -1,0 +1,33 @@
+# Kiln RK3588 kernel config fragment (vendor rknpu on mainline).
+# Applied on top of an RK3588 base kernel config. Restated for clarity; most of
+# these are already =y in a normal rk3588 defconfig.
+#
+# Kiln-only image: the out-of-tree vendor rknpu.ko binds the single
+# rockchip,rk3588-rknpu node (rk3588-rock-5b-kiln.dtb, from
+# kernel-patches-rk3588/0001). That DTB deletes the mainline accel/rocket
+# rknn_core nodes, so the open rocket driver has nothing to bind and stays idle.
+
+# The vendor rknpu.ko needs the platform stack below.
+CONFIG_DRM=y
+CONFIG_DRM_ACCEL=y
+CONFIG_ROCKCHIP_IOMMU=y
+# CRITICAL for RK3588: the NPU clock is &scmi_clk SCMI_CLK_NPU (SCMI), unlike
+# RK3576 where Kiln routes clk_npu via CRU. Without the SCMI clock provider the
+# NPU node fails to get its "npu" clock.
+CONFIG_ARM_SCMI_PROTOCOL=y
+CONFIG_COMMON_CLK_SCMI=y
+CONFIG_DMABUF_HEAPS=y
+CONFIG_ROCKCHIP_PM_DOMAINS=y
+# ext4 metadata_csum needs crc32c or the rootfs mount panics.
+CONFIG_CRYPTO_CRC32C=y
+
+# ftrace + tracepoints (debug chain): on-board driver tracing (kiln-env-trace).
+CONFIG_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+
+# The accel/rocket driver stays BUILT-IN (=y). As on RK3576, this kernel tree's
+# drivers/iommu/rockchip-iommu.c references `rocket_wtrace` (a debug module param
+# defined in drivers/accel/rocket), so building WITHOUT rocket fails to link. It
+# is harmless here: the Kiln DTB removes the rknn_core nodes, so rocket never
+# binds. (SoC-independent link dependency -- same note as npu.fragment.)
+CONFIG_DRM_ACCEL_ROCKET=y
