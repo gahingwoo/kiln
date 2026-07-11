@@ -31,7 +31,7 @@ BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.1.3-kiln"
 BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
 # base.config is copied into dl/ by build-image.sh from the kernel tree.
 BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_KILN_PATH)/dl/base.config"
-# Kiln fragment turns CONFIG_DRM_ACCEL_ROCKET off (vendor rknpu binds the NPU).
+# Kiln fragment restates the NPU platform config; the vendor rknpu.ko binds the NPU.
 BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_KILN_PATH)/npu.fragment"
 BR2_LINUX_KERNEL_IMAGE_TARGET_CUSTOM=y
 BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="Image"

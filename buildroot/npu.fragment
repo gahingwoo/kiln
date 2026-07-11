@@ -4,9 +4,11 @@
 # DMABUF_HEAPS=y, IOMMU_DMA=y, ROCKCHIP_PM_DOMAINS=y, PM_DEVFREQ=y, CMA=y,
 # DMA_CMA=y -- all verified in that file).
 #
-# Kiln-only image: the out-of-tree vendor rknpu.ko binds npu@27700000; the open
-# accel/rocket driver is turned OFF (CONFIG_DRM_ACCEL_ROCKET below). (The dual
-# kiln|rocket image is a separate maintainer build; this defconfig is kiln-only.)
+# Kiln-only image: the out-of-tree vendor rknpu.ko binds npu@27700000. The image ships
+# ONLY the kiln dtb (no -rocket dtb) and no rocket userspace, so it boots kiln only.
+# The accel/rocket DRIVER, however, stays built-in (see CONFIG_DRM_ACCEL_ROCKET below) --
+# it just idles, because it binds only a dtb with an rknn_core node, which the kiln dtb
+# lacks.
 
 # rknpu.ko is out-of-tree (built in post-build.sh); the kernel only needs the
 # platform stack below (already =y in base.config, restated for clarity).
@@ -27,6 +29,11 @@ CONFIG_CRYPTO_CRC32C=y
 CONFIG_FTRACE=y
 CONFIG_FUNCTION_TRACER=y
 
-# Kiln-only: the open accel/rocket driver is OFF -- the vendor rknpu.ko owns the NPU.
-# merge_config honours "is not set" to disable it even if base.config had it on.
-# CONFIG_DRM_ACCEL_ROCKET is not set
+# The accel/rocket driver stays BUILT-IN (=y). We'd prefer to turn it off for a truly
+# kiln-only kernel, but this kernel tree's drivers/iommu/rockchip-iommu.c references
+# `rocket_wtrace` (a debug module param defined in drivers/accel/rocket), so building
+# WITHOUT rocket fails to link (undefined reference to rocket_wtrace). It's harmless: the
+# kiln-only image ships no rocket dtb, so the driver never binds and just idles. Fully
+# removing it needs that rocket_wtrace hook guarded under CONFIG_DRM_ACCEL_ROCKET in the
+# kernel tree (a reference-tree change, outside this repo).
+CONFIG_DRM_ACCEL_ROCKET=y
