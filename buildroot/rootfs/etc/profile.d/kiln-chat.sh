@@ -10,9 +10,10 @@ case "$-" in
 			printf '  ==================================================================\n'
 			printf '   Kiln  -  LLM + vision on the RK3576 NPU  (mainline kernel)\n'
 			printf '  ==================================================================\n'
+			printf '   kiln                  menu: chat / vision / models / serve / ...\n'
 			printf '   kiln-chat             chat with an LLM on the NPU\n'
-			printf '   kiln-vision <img>     classify/detect an image on the NPU\n'
-			printf '   kiln-config           settings / models    kiln-doctor  health\n'
+			printf '   kiln-vision <img>     classify / detect an image on the NPU\n'
+			printf '   kiln-doctor  health   ·   kiln-config  settings   ·   kiln-convert  get a model\n'
 			printf '                         e.g.  kiln-vision /opt/models/test.jpg\n'
 			printf '  ==================================================================\n\n'
 		fi

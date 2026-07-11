@@ -24,9 +24,7 @@ BR_SRC="${BR_SRC:-$KILN_REF_ROOT/linux-rk3576-npu/buildroot/br-src}"            
 KERNEL_SRC="${KERNEL_SRC:-$(cd "$(dirname "$0")/.." && pwd)/kernel-dual/linux-7.1.3}"
 BASE_CONFIG="${BASE_CONFIG:-$KILN_REF_ROOT/linux-rk3576-npu/kernel/base.config}"     # kernel .config base
 ROCKCHIP_BINARIES="${ROCKCHIP_BINARIES:-$KILN_REF_ROOT/rock4d_package/binaries}"     # rock4d u-boot dir
-# rocket-mode userspace assets (replay_rocket + captured payload + libteflon)
-KILN_ROCKET_ASSETS="${KILN_ROCKET_ASSETS:-$KILN_REF_ROOT/linux-rk3576-npu/rootfs-overlay}"
-export KILN_ROCKET_ASSETS
+# Kiln-only image: the open rocket driver + its userspace are NOT included.
 # -----------------------------------------------------------------------------
 
 KILN="$(cd "$(dirname "$0")/.." && pwd)"

@@ -1,13 +1,12 @@
 # Kiln kernel config fragment (RK3576 NPU, vendor rknpu on mainline).
-# Applied on top of the rocket tree's kernel/base.config (which already sets
-# DRM=y, DRM_ACCEL=y, ARM_SCMI_PROTOCOL=y, COMMON_CLK_SCMI=y, ROCKCHIP_IOMMU=y,
+# Applied on top of the base kernel/base.config (which already sets DRM=y,
+# DRM_ACCEL=y, ARM_SCMI_PROTOCOL=y, COMMON_CLK_SCMI=y, ROCKCHIP_IOMMU=y,
 # DMABUF_HEAPS=y, IOMMU_DMA=y, ROCKCHIP_PM_DOMAINS=y, PM_DEVFREQ=y, CMA=y,
 # DMA_CMA=y -- all verified in that file).
 #
-# Dual-image: BOTH NPU drivers are present. The out-of-tree vendor rknpu.ko binds
-# npu@27700000 in the KILN dtb; the built-in accel/rocket binds it in the ROCKET
-# dtb. Only one DT node for that address exists per dtb (KILN_ROCKET_NPU swap), so
-# they never conflict. See CONFIG_DRM_ACCEL_ROCKET below.
+# Kiln-only image: the out-of-tree vendor rknpu.ko binds npu@27700000; the open
+# accel/rocket driver is turned OFF (CONFIG_DRM_ACCEL_ROCKET below). (The dual
+# kiln|rocket image is a separate maintainer build; this defconfig is kiln-only.)
 
 # rknpu.ko is out-of-tree (built in post-build.sh); the kernel only needs the
 # platform stack below (already =y in base.config, restated for clarity).
@@ -21,16 +20,13 @@ CONFIG_ROCKCHIP_PM_DOMAINS=y
 # ext4 metadata_csum needs crc32c or the rootfs mount panics (rocket-tree note).
 CONFIG_CRYPTO_CRC32C=y
 
-# ftrace + tracepoints for capture/env-trace.sh (the vendor-vs-rocket driver-
-# environment diff). base.config has CONFIG_FTRACE off; FUNCTION_TRACER selects
-# TRACING -> tracefs + trace events + TRACEPOINTS, so the built-in
-# regmap_reg_write / clk / power_domain / iommu tracepoints are all present.
+# ftrace + tracepoints (debug chain): the built-in regmap_reg_write / clk /
+# power_domain / iommu tracepoints for on-board driver tracing (kiln-env-trace).
+# base.config has CONFIG_FTRACE off; FUNCTION_TRACER selects TRACING -> tracefs +
+# trace events + TRACEPOINTS.
 CONFIG_FTRACE=y
 CONFIG_FUNCTION_TRACER=y
 
-# Dual-image: build the open accel/rocket driver BUILT-IN (not a module). It must
-# be =y, not =m: the fork's RK3576 patches call arch_sync_dma_for_device(), which
-# the kernel does NOT export to modules, so =m fails at modpost. Built-in is also
-# cleaner for the toggle -- rocket binds ONLY when a dtb provides an rknn_core
-# node (the ROCKET dtb); in the KILN dtb that node is #ifndef'd out, so it idles.
-CONFIG_DRM_ACCEL_ROCKET=y
+# Kiln-only: the open accel/rocket driver is OFF -- the vendor rknpu.ko owns the NPU.
+# merge_config honours "is not set" to disable it even if base.config had it on.
+# CONFIG_DRM_ACCEL_ROCKET is not set

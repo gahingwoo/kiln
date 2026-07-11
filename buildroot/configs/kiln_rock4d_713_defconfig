@@ -39,7 +39,9 @@ BR2_LINUX_KERNEL_DTS_SUPPORT=y
 # The vendor rknpu node + IOMMUs are added to the in-tree rk3576-rock-4d dtb by
 # kernel-patches/0004 (KERNEL_SRC must have 0001-0010 applied); clk_npu via CRU
 # (not SCMI). So we build the stock in-tree DTS name, no custom/overlay DTS.
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3576-rock-4d rockchip/rk3576-rock-4d-rocket"
+# Kiln-only image: build ONLY the kiln dtb (the -rocket variant is dropped; the
+# open rocket driver is off in npu.fragment).
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3576-rock-4d"
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 
@@ -48,6 +50,27 @@ BR2_PACKAGE_DROPBEAR=y
 # librkllmrt/librknnrt need libstdc++/libgomp/pthread (in the toolchain) + libdrm
 # (librkllmrt statically links its own libdrm, but libdrm on target is harmless).
 BR2_PACKAGE_LIBDRM=y
+
+# --- base tools + debug chain -----------------------------------------------
+# whiptail is required for kiln-config / the `kiln` menu; the rest is a working
+# on-board debug set (busybox alone is too thin for NPU/driver bring-up).
+BR2_PACKAGE_NEWT=y            # provides whiptail
+BR2_PACKAGE_SUDO=y
+BR2_PACKAGE_BINUTILS=y        # strings / objdump / nm / readelf / addr2line
+BR2_PACKAGE_MAKE=y
+BR2_PACKAGE_PKGCONF=y
+BR2_PACKAGE_GDB=y
+BR2_PACKAGE_GDB_DEBUGGER=y    # full gdb on the target (not just gdbserver)
+BR2_PACKAGE_STRACE=y
+BR2_PACKAGE_FILE=y
+BR2_PACKAGE_LSOF=y
+BR2_PACKAGE_PROCPS_NG=y       # ps / top / free / pkill (fuller than busybox)
+BR2_PACKAGE_HTOP=y
+BR2_PACKAGE_PCIUTILS=y        # lspci
+BR2_PACKAGE_USBUTILS=y        # lsusb
+BR2_PACKAGE_ETHTOOL=y
+BR2_PACKAGE_I2C_TOOLS=y       # i2cdetect/i2cget -- handy for RK PMIC/board probing
+BR2_PACKAGE_NANO=y            # a friendly editor next to busybox vi
 
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y

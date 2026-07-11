@@ -87,34 +87,48 @@ done
 	&& install -D -m0755 "$KILN/capture/env-trace.sh" "$TARGET_DIR/usr/bin/kiln-env-trace" \
 	&& echo "[kiln] installed kiln-env-trace -> /usr/bin/"
 
-# --- 2d. dual-image ROCKET-mode userspace ----------------------------------
-# The same image boots either the vendor rknpu (kiln DTB) or the open rocket
-# driver (rocket DTB). For rocket mode, ship a LIGHT NPU-submit workload:
-# replay_rocket (libc-only C binary) replays a captured task_number=N conv job
-# through /dev/accel/accel0 -- it exercises the rocket driver's power/clk/iommu/
-# submit path (what env-trace measures) with no Python/tflite stack. libteflon.so
-# is shipped too for the full mesa-teflon path if wanted.
-RA="${KILN_ROCKET_ASSETS:-}"
-if [ -n "$RA" ] && [ -x "$RA/opt/npu-test/replay_rocket" ]; then
-	install -D -m0755 "$RA/opt/npu-test/replay_rocket" "$TARGET_DIR/opt/rocket/replay_rocket"
-	mkdir -p "$TARGET_DIR/opt/rocket/replay_payload"
-	install -m0644 "$RA/opt/npu-test/rknpu_replay/"* "$TARGET_DIR/opt/rocket/replay_payload/"
-	[ -f "$RA/usr/lib/libteflon.so" ] && install -D -m0644 "$RA/usr/lib/libteflon.so" "$TARGET_DIR/usr/lib/libteflon.so"
-	# wrapper: load rocket, replay the captured job (the rocket-mode NPU workload)
-	install -D -m0755 /dev/stdin "$TARGET_DIR/usr/bin/kiln-rocket-run" <<'ROCKET'
-#!/bin/sh
-# Rocket-mode NPU workload: replay a captured task_number=N conv job through the
-# open accel/rocket driver. Use as the env-trace workload:
-#   kiln-env-trace rocket -- kiln-rocket-run
-[ "$(id -u)" -eq 0 ] || { echo "run as root"; exit 1; }
-grep -q '^rocket' /proc/modules 2>/dev/null || modprobe rocket 2>/dev/null || true
-[ -e /dev/accel/accel0 ] || { echo "kiln-rocket-run: /dev/accel/accel0 missing -- booted the ROCKET dtb? (extlinux 'rocket' entry)"; exit 1; }
-cd /opt/rocket && ./replay_rocket ./replay_payload
-ROCKET
-	echo "[kiln] installed rocket-mode workload -> /opt/rocket/ + /usr/bin/kiln-rocket-run"
-else
-	echo "[kiln] NOTE: KILN_ROCKET_ASSETS not set / replay_rocket missing; rocket-mode workload NOT baked"
+# --- 2d. mark this image as a finished Kiln install -------------------------
+# The Armbian installer writes these markers + config; a flashed buildroot image
+# IS the finished product, so seed them here -- otherwise kiln-doctor wrongly warns
+# "not the Kiln kernel" and "no config.ini". Line 1 of patched-kernel must equal the
+# target's `uname -r` ($KREL) for the doctor's kernel check to pass.
+mkdir -p "$TARGET_DIR/etc/kiln"
+printf '%s\nbuildroot-image\n' "$KREL" > "$TARGET_DIR/etc/kiln/patched-kernel"
+: > "$TARGET_DIR/etc/kiln/phase2-done"
+# The buildroot image's login banner is the static /etc/profile.d/kiln-chat.sh; the
+# install-status kiln-motd.sh is an Armbian-installer artifact, so drop it here to
+# avoid a duplicate banner (both ship in the shared rootfs/ overlay).
+rm -f "$TARGET_DIR/etc/profile.d/kiln-motd.sh"
+if [ ! -f "$TARGET_DIR/etc/kiln/config.ini" ]; then
+	cat > "$TARGET_DIR/etc/kiln/config.ini" <<'CFG'
+# Kiln unified config -- read by kiln-chat, kiln-vision, kiln-serve.
+# Edit by hand; kiln-chat can also change LLM knobs live (/help). Models are
+# empty here -> the tools auto-discover any *.rkllm / *.rknn in /opt/models.
+
+[llm]
+model =
+max_context_len = 2048
+max_new_tokens = 512
+temperature = 0.7
+top_k = 1
+top_p = 0.8
+repeat_penalty = 1.3
+keep_history = 1
+system_prompt =
+
+[vision]
+model =
+labels = /opt/models/imagenet_labels.txt
+top_n = 5
+core_mask = auto
+priority = high
+
+[server]
+host = 0.0.0.0
+port = 8080
+CFG
 fi
+echo "[kiln] seeded /etc/kiln (patched-kernel=$KREL, phase2-done, config.ini)"
 
 # --- 3. models + vision assets ----------------------------------------------
 mkdir -p "$TARGET_DIR/opt/models"
