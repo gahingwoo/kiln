@@ -74,3 +74,23 @@ for a baked ~1.4 GB LLM). By default `post-build.sh` bakes only the small vision
 `model/`**); the large LLM `.rkllm` is baked only with `KILN_BAKE_MODEL=1
 ./buildroot/build-image.sh`. Kiln ships no models — put a `*.rkllm` / `*.rknn` in
 `model/` to bake, or `scp` them to `/opt/models` on the board.
+
+## Publishing a flashable image (Releases)
+
+A pre-built image is the smoothest install for users — **`dd` and boot**, skipping
+`curl | bash`, the double reboot, and the Wi-Fi rebuild. Publishing is deliberately
+gated on hardware validation:
+
+1. Build it: `./buildroot/build-image.sh` → `br-out/images/sdcard.img`.
+2. **Flash it to a card and boot a real board** — confirm `kiln-doctor` is green. Kiln
+   does not ship images that haven't run on hardware.
+3. Publish: `scripts/release-image.sh` — compresses (`xz`), checksums, and creates/updates
+   a GitHub Release with `dd` instructions in the notes. Needs `gh` (authenticated) + `xz`.
+
+```sh
+scripts/release-image.sh --board rock-4d          # after a validated build
+```
+
+This is not done in CI: the image build needs the external reference trees
+(`$KILN_REF_ROOT`, outside the repo) and, more importantly, the on-hardware check that CI
+can't do.

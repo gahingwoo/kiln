@@ -1,17 +1,22 @@
-# Kiln — LLM + vision on the RK3576 NPU, mainline kernel
+# Kiln — offline local AI (LLM + vision) on the RK3576 NPU
 
-Run **LLM and vision** inference on the **Rockchip RK3576 NPU** on a **mainline**
-Linux kernel, by building the vendor GPL `rknpu` driver **out-of-tree** and driving
-it with the closed `librkllmrt` (RKLLM, LLMs) and `librknnrt` (RKNN, CNN vision)
-runtimes. Exposed as an integrable local service: an **OpenAI-compatible API**
-(`kiln-serve`) plus a slash-command chat CLI over one config file.
+**A private, offline AI assistant and image recognition on your Radxa ROCK 4D — one
+command to install.** Chat with a local LLM and classify or detect objects in images,
+all running on the board's **NPU** — nothing leaves the device, no cloud, no API keys.
+It's exposed as an **OpenAI-compatible API**, so you can point **Open WebUI** (a
+ChatGPT-style web UI), **LangChain**, or any OpenAI client straight at the board.
 
-The vendor RKLLM/RKNN stack normally runs on the vendor 6.1 BSP kernel. Kiln puts
-that same stack (vendor `rknpu.ko` v0.9.8 + `librkllmrt` + `librknnrt`) on a clean
-**mainline `linux-7.1.3`** base (kernel.org, not Armbian's downstream) using
-mainline's own clock / power-domain / IOMMU drivers — **plus a small, focused NPU
-patch set** (`kernel-patches/` 0001–0010). It is mainline-*based*, **not stock
-mainline**: those ten patches are required (see *Why it needs kernel patches*).
+```sh
+curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
+# reboots itself, then: `kiln` for a menu, `kiln-chat` to talk, `kiln-serve` for the API
+```
+
+**How it works (the hard part).** The vendor RKLLM/RKNN NPU stack normally only runs on
+Rockchip's old 6.1 BSP kernel. Kiln runs that same stack on a **clean mainline
+`linux-7.1.3`** kernel instead: it builds the vendor GPL `rknpu` driver **out-of-tree**
+and adds a small, focused kernel patch set (clock / power-domain / two-IOMMU fixes) that
+a module alone can't supply. It is mainline-*based*, not stock mainline — those patches
+are required (see *Why it needs kernel patches*).
 
 > **Companion project:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
 > is the other half of the same effort — the from-scratch *open* RK3576 NPU driver
@@ -124,6 +129,10 @@ reading one config (`/etc/kiln/config.ini`):
 All of these read `/etc/kiln/config.ini` — edited by hand (or via `kiln-config`);
 only the fields the closed runtimes actually expose. See [`docs/CONFIG.md`](docs/CONFIG.md).
 
+**Something wrong?** Run `sudo kiln-doctor`, then search
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for the exact error. Want a
+ChatGPT-style web UI on the board? [`docs/OPENWEBUI.md`](docs/OPENWEBUI.md).
+
 ## Install
 
 **On Armbian** — one command, then walk away. It pre-downloads everything, installs
@@ -149,10 +158,17 @@ bash kiln-install.sh          # then run it
 Want to keep control of the reboots? `KILN_MANUAL=1 bash kiln-install.sh` does the
 two phases by hand (it tells you when to reboot and re-run) instead of auto-continuing.
 
-**Flashable image** — instead of installing on Armbian, build the whole thing as a
-buildroot br2-external `sdcard.img` (rootfs + module + optional baked-in model). This
-is the maintainer path — it needs prepared kernel/reference trees — so follow
-[`buildroot/README.md`](buildroot/README.md) rather than running the scripts blind.
+**Flashable image (flash & boot)** — the smoothest path when a pre-built image is
+published: **`dd` it to an SD card and boot** — no `curl | bash`, no double reboot, no
+Wi-Fi rebuild. Pre-built images (when a validated build exists) are on the
+[Releases](https://github.com/gahingwoo/kiln/releases) page; flash with:
+```sh
+xz -dc kiln-rock-4d-*.img.xz | sudo dd of=/dev/sdX bs=8M status=progress conv=fsync
+```
+To build the image yourself, it's a buildroot br2-external `sdcard.img` (rootfs + module
++ optional baked-in model) — the maintainer path, needs prepared kernel/reference trees;
+follow [`buildroot/README.md`](buildroot/README.md). Publish a built+validated image with
+`scripts/release-image.sh`.
 
 **Kernel** — CI publishes the `.deb`s; build it yourself per
 [`MAINLINE-KERNEL.md`](MAINLINE-KERNEL.md). The module alone builds against any

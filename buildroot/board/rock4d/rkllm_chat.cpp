@@ -380,6 +380,22 @@ static bool handle_command(const std::string &line, KilnLLM &llm, KilnConfig &cf
 static KilnLLM *g_llm = nullptr;
 static void on_sigint(int) { printf("\nExiting ...\n"); exit(0); }
 
+// Slash commands for the "/" picker (type a lone '/' at the prompt). The bare
+// command is run on pick; ones that take args (/model, /system, /history) act on
+// their no-arg behaviour (open a picker / show current), which is the sensible default.
+static const struct { const char *cmd; const char *desc; } SLASH_CMDS[] = {
+    {"/help",    "show all commands"},
+    {"/model",   "switch the LLM model (arrow-key picker)"},
+    {"/system",  "show / set / clear the system prompt"},
+    {"/history", "toggle multi-turn memory on / off"},
+    {"/context", "show the context window and usage"},
+    {"/compact", "summarize the conversation to free context"},
+    {"/clear",   "forget the conversation, keep the system prompt"},
+    {"/new",     "start a fresh session"},
+    {"/status",  "show model / history / turns"},
+    {"/exit",    "leave kiln-chat"},
+};
+
 int main(int argc, char **argv) {
     KilnConfig cfg;
     kiln::load(cfg);
@@ -422,7 +438,7 @@ int main(int argc, char **argv) {
 
     printf("\n%s=== Kiln  ·  RK3576 NPU LLM  ·  %s ===%s\n",
            C_TITLE, base_of(cfg.llm_model).c_str(), C_RST);
-    printf("%shistory %s   ·   type a message, or /help for commands%s\n",
+    printf("%shistory %s   ·   type a message, or / for a command menu (/help lists them)%s\n",
            C_DIM, cfg.llm_keep_history ? "multi-turn" : "single-turn", C_RST);
 
     const std::string prompt = mkprompt("you > ");   // ASCII '>' keeps readline's cursor math exact
@@ -432,6 +448,19 @@ int main(int argc, char **argv) {
         if (!read_input(prompt.c_str(), input)) break;   // Ctrl-D / EOF
         input = trim(input);
         if (input.empty()) continue;
+
+        // A lone '/' opens a menu of the slash commands (no need to remember them).
+        if (input == "/") {
+            std::vector<std::string> items;
+            for (const auto &c : SLASH_CMDS) {
+                char row[96]; snprintf(row, sizeof(row), "%-9s %s", c.cmd, c.desc);
+                items.push_back(row);
+            }
+            int pick = select_menu("commands (Enter runs it)", items, 0);
+            if (pick == -2) { print_help(cfg, st); continue; }   // not a tty: just list them
+            if (pick < 0) continue;                              // cancelled
+            input = SLASH_CMDS[pick].cmd;                        // fall through and run it
+        }
 
         if (input[0] == '/') {
             if (!handle_command(input, llm, cfg, st)) break;

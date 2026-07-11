@@ -23,6 +23,19 @@ All read one config, `/etc/kiln/config.ini`.
 | [SERVER.md](SERVER.md) | `kiln-serve` — the OpenAI-compatible HTTP API (LLM + optional vision). |
 | [VISION.md](../VISION.md) | `kiln-vision` — MobileNet image classification + YOLO object detection, and how to build an `.rknn` (`kiln-convert`). |
 
+## Integrate & operate
+
+| doc | what |
+|---|---|
+| [OPENWEBUI.md](OPENWEBUI.md) | Point **Open WebUI** (a ChatGPT-style web page), **LangChain**, the `openai` SDK, or any OpenAI client at the board. |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | **Symptom / exact error → cause → fix** knowledge base (Ctrl-F the message you're seeing). Start with `sudo kiln-doctor`. |
+| [BENCHMARK.md](BENCHMARK.md) | Measured LLM tok/s, vision ms/fps, and detection latency — and how to reproduce them. |
+
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md). The single most useful contribution right now
+is **testing on a board other than the ROCK 4D** and reporting back.
+
 ## Boards
 
 | doc | board |

@@ -22,7 +22,7 @@
 #include "kiln_llm.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "kiln_vision.h"   // optional /v1/vision/classify (pulls in stb decoder)
-#include "kiln_detect.h"   // optional /v1/vision/detect (EXPERIMENTAL YOLOv8/11)
+#include "kiln_detect.h"   // optional /v1/vision/detect (YOLO detection)
 
 #include <atomic>
 #include <memory>
@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
     // Optional vision: only load it if the .rknn exists, so a box that only wants
     // the LLM doesn't pay for it (and it never crashes when absent).
     std::unique_ptr<KilnVision> vision;
-    std::unique_ptr<KilnDetect> detector;   // EXPERIMENTAL: [vision] task = detect
+    std::unique_ptr<KilnDetect> detector;   // [vision] task = detect (YOLO)
     {
         KilnConfig vc = cfg; vc.vision_model = kiln::resolve_model(cfg.server_vision(), ".rknn");
         FILE *vf = fopen(vc.vision_model.c_str(), "rb");
@@ -165,6 +165,18 @@ int main(int argc, char **argv) {
            cfg.server_host.c_str(), cfg.server_port);
 
     httplib::Server srv;
+
+    // CORS: allow any origin so browser-based OpenAI clients (and Open WebUI's proxy)
+    // can call the box directly. The API is unauthenticated and LAN-local by design;
+    // put it behind a reverse proxy if you expose it beyond a trusted network.
+    srv.set_default_headers({
+        {"Access-Control-Allow-Origin", "*"},
+        {"Access-Control-Allow-Headers", "Authorization, Content-Type"},
+        {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
+    });
+    srv.Options(R"(/.*)", [](const httplib::Request &, httplib::Response &res) {
+        res.status = 204;   // CORS preflight
+    });
 
     srv.Get("/health", [](const httplib::Request &, httplib::Response &res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
@@ -300,7 +312,7 @@ int main(int argc, char **argv) {
             objs.push_back({{"class_id", o.class_id}, {"label", o.label}, {"score", o.score},
                             {"box", {o.box.x1, o.box.y1, o.box.x2, o.box.y2}}});
         res.set_content(json{{"model", vpath.substr(vpath.find_last_of('/') + 1)},
-                             {"experimental", true}, {"inference_ms", ms}, {"objects", objs}}.dump(), "application/json");
+                             {"inference_ms", ms}, {"objects", objs}}.dump(), "application/json");
     });
 
     if (!srv.listen(cfg.server_host.c_str(), cfg.server_port)) {

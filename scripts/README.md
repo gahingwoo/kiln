@@ -12,6 +12,7 @@ The Kiln CLIs and installer. End-user usage lives in the root
 | `kiln-config` | whiptail TUI front-end to `/etc/kiln/config.ini`. See [`../docs/TOOLS.md`](../docs/TOOLS.md). |
 | `kiln-convert` | get/convert a model to a `.rknn` **on the board** (private `rknn-toolkit2` venv pinned to the runtime): model-zoo shortcut, URL, or local ONNX. See [`../docs/TOOLS.md`](../docs/TOOLS.md). |
 | `build-dual-kernel-tree.sh` | maintainer-only: builds the dual-boot (vendor `rknpu` \| open `rocket`) kernel tree that `buildroot/build-image.sh` flashes. Needs external reference trees — not part of the on-board install. |
+| `release-image.sh` | maintainer-only: publish a built + **hardware-validated** `sdcard.img` as a GitHub Release asset (xz + sha256 + `dd` instructions). Needs `gh` + `xz`. |
 
 ## The install flow
 
