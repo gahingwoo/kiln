@@ -27,10 +27,14 @@
 #include <atomic>
 #include <memory>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <string>
 #include <vector>
 #include <dirent.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
 using nlohmann::json;
 
@@ -40,6 +44,38 @@ static std::string now_id(const char *prefix) {
     snprintf(buf, sizeof(buf), "%s-%ld%03lu", prefix, (long)time(nullptr),
              (seq++ % 1000));
     return buf;
+}
+
+// Best-effort primary LAN IPv4: ask the kernel which source address it would use to
+// reach a public host (no packet is actually sent). So we can print a real, copy-paste
+// connection string instead of a <board-ip> placeholder. Falls back to 127.0.0.1.
+static std::string primary_ip() {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return "127.0.0.1";
+    sockaddr_in dst{}; dst.sin_family = AF_INET; dst.sin_port = htons(53);
+    inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+    std::string ip = "127.0.0.1";
+    if (connect(s, (sockaddr *)&dst, sizeof(dst)) == 0) {
+        sockaddr_in loc{}; socklen_t len = sizeof(loc);
+        char buf[INET_ADDRSTRLEN];
+        if (getsockname(s, (sockaddr *)&loc, &len) == 0 && inet_ntop(AF_INET, &loc.sin_addr, buf, sizeof(buf)))
+            ip = buf;
+    }
+    close(s);
+    return ip;
+}
+
+// A clean model name for /v1/models + response "model" fields: drop the .rkllm and the
+// noisy conversion suffixes, so an Open WebUI picker shows "Qwen2.5-1.5B", not
+// "Qwen2.5-1.5B-rk3576-w4a16.rkllm". The server ignores the requested model anyway.
+static std::string clean_model_name(const std::string &path) {
+    std::string n = path.substr(path.find_last_of('/') + 1);
+    auto strip = [&](const char *suf) {
+        size_t L = strlen(suf);
+        if (n.size() >= L && n.compare(n.size() - L, L, suf) == 0) n.erase(n.size() - L);
+    };
+    strip(".rkllm"); strip("-rk3576-w4a16"); strip("_rk3576"); strip("-rk3576");
+    return n.empty() ? "model" : n;
 }
 
 // Flatten OpenAI messages -> one ChatML string (stateless; the client resends
@@ -98,7 +134,7 @@ int main(int argc, char **argv) {
     // / [llm].model if it exists, else the first *.rkllm in /opt/models. Empty -> no
     // LLM (vision-only), which is a valid mode (e.g. RK3568).
     const std::string model_path = kiln::resolve_model(cfg.server_llm(), ".rkllm");
-    const std::string model_name = model_path.empty() ? "" : model_path.substr(model_path.find_last_of('/') + 1);
+    const std::string model_name = model_path.empty() ? "" : clean_model_name(model_path);
 
     // Optional LLM: RK3568 (and any vision-only box) has no .rkllm, so don't hard
     // fail -- start vision-only and let /v1/chat/completions answer 503.
@@ -163,6 +199,18 @@ int main(int argc, char **argv) {
            vision ? (llm ? "+classify" : "classify") : "",
            detector ? ((llm || vision) ? "+detect" : "detect") : "",
            cfg.server_host.c_str(), cfg.server_port);
+    // Print a real, copy-paste connection string (IP filled in), so users don't have to
+    // look up the board's address or edit a <board-ip> placeholder.
+    {
+        bool local_only = cfg.server_host == "127.0.0.1" || cfg.server_host == "localhost";
+        std::string ip = (cfg.server_host == "0.0.0.0" || cfg.server_host == "::") ? primary_ip() : cfg.server_host;
+        printf("  -> Open WebUI / OpenAI:  OPENAI_API_BASE_URL=http://%s:%d/v1   (API key: any)\n", ip.c_str(), cfg.server_port);
+        printf("  -> test:                 curl http://%s:%d/v1/models\n", ip.c_str(), cfg.server_port);
+        if (local_only)
+            printf("  -> NOTE: host=%s accepts LOCAL connections only. To reach it from Open WebUI\n"
+                   "           or another machine, set [server] host = 0.0.0.0 (kiln-config -> Server).\n",
+                   cfg.server_host.c_str());
+    }
 
     httplib::Server srv;
 
@@ -186,8 +234,7 @@ int main(int argc, char **argv) {
         json data = json::array();
         if (llm) {
             for (const auto &p : list_models(model_path)) {
-                std::string n = p.substr(p.find_last_of('/') + 1);
-                data.push_back({{"id", n}, {"object", "model"}, {"owned_by", "kiln"}});
+                data.push_back({{"id", clean_model_name(p)}, {"object", "model"}, {"owned_by", "kiln"}});
             }
             if (data.empty())
                 data.push_back({{"id", model_name}, {"object", "model"}, {"owned_by", "kiln"}});

@@ -39,6 +39,52 @@ status_line() {
 	printf 'NPU: %s    models  LLM:%s  Vision:%s    ·  pick what to run:' "$npu" "$llm" "$vis"
 }
 
+# This board's primary LAN IPv4 (so we can show a real, copy-paste connection string).
+board_ip() {
+	ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1);exit}}')
+	[ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+	echo "${ip:-127.0.0.1}"
+}
+ini_get() {  # section key -> value from the config
+	awk -v s="$1" -v k="$2" '
+		/^[ \t]*\[.*\][ \t]*$/{h=$0;sub(/^[ \t]*\[/,"",h);sub(/\][ \t]*$/,"",h);t=(h==s);next}
+		t{if(match($0,/^[ \t]*[^=]*=/)){n=substr($0,1,RLENGTH-1);gsub(/^[ \t]+|[ \t]+$/,"",n);
+		  if(n==k){v=substr($0,RLENGTH+1);sub(/[ \t]#.*$/,"",v);gsub(/^[ \t]+|[ \t]+$/,"",v);print v;exit}}}
+	' "${KILN_CONFIG:-/etc/kiln/config.ini}" 2>/dev/null
+}
+
+# Show the ready-to-copy connection info for Open WebUI / any OpenAI client, with the
+# board's IP already filled in -- surfaces docs/OPENWEBUI.md right in the menu.
+webui_info() {
+	host=$(ini_get server host); [ -n "$host" ] || host=0.0.0.0
+	port=$(ini_get server port); [ -n "$port" ] || port=8080
+	case "$host" in 0.0.0.0|::|"") ip=$(board_ip) ;; *) ip=$host ;; esac
+	base="http://$ip:$port/v1"
+	up=""
+	{ command -v systemctl >/dev/null 2>&1 && systemctl is-active kiln-serve >/dev/null 2>&1; } || pgrep -x kiln-serve >/dev/null 2>&1 && up=1
+	note=""
+	case "$host" in 127.0.0.1|localhost) note="
+! [server] host = $host -- only THIS board can connect. For Open WebUI / another
+  machine, set host = 0.0.0.0:  Kiln menu -> config -> Server." ;; esac
+	[ -n "$up" ] || note="$note
+· kiln-serve is not running yet -- start it from the menu (serve), or: kiln serve"
+	whiptail --backtitle "$BT" --title "Connect a web UI (Open WebUI / OpenAI)" --msgbox "\
+Point any OpenAI client at your board -- no code changes, just a base URL:
+
+  Base URL :  $base
+  API key  :  anything (it is ignored)
+
+ChatGPT-style web page: run Open WebUI ON YOUR PC (Docker), not on the board --
+
+  docker run -d -p 3000:8080 -e OPENAI_API_BASE_URL=$base -e OPENAI_API_KEY=kiln ghcr.io/open-webui/open-webui:main
+
+Then open  http://localhost:3000  and pick the model.
+Quick test:  curl $base/models
+$note
+
+Full guide: docs/OPENWEBUI.md" 23 78 1>/dev/tty
+}
+
 serve_menu() {
 	if have systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^kiln-serve'; then
 		st=$(systemctl is-active kiln-serve 2>/dev/null || echo unknown)
@@ -72,6 +118,7 @@ menu_loop() {
 			vision "Classify / detect an image     (kiln-vision)" \
 			models "Get / convert a model          (kiln-convert)" \
 			serve  "API server: start / stop       (kiln-serve)" \
+			webui  "Connect a web UI               (Open WebUI / OpenAI)" \
 			config "Settings & diagnostics         (kiln-config)" \
 			doctor "Health check                   (kiln-doctor)" \
 			quit   "Quit" 3>&1 1>&2 2>&3) || break
@@ -84,6 +131,7 @@ menu_loop() {
 				[ -n "$img" ] && run_pause sh -c 'kiln-vision "$@"' _ $img ;;
 			models) run_pause kiln-convert ;;
 			serve)  serve_menu ;;
+			webui)  webui_info ;;
 			config) run_pause kiln-config ;;
 			doctor) run_pause kiln-doctor ;;
 			quit|"") break ;;

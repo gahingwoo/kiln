@@ -17,11 +17,20 @@ kiln-serve --host 0.0.0.0 --port 8080
 ```
 
 `host = 0.0.0.0` is important — `127.0.0.1` would only accept connections from the board
-itself. Sanity-check from another machine on the LAN:
+itself (`kiln-doctor` warns if it's set that way).
 
-```sh
-curl http://<board-ip>:8080/v1/models
+**You don't need to look up the board's IP.** On startup `kiln-serve` prints the exact
+connection string with the IP already filled in:
+
 ```
+kiln-serve: ready [chat+classify]. Listening on http://0.0.0.0:8080  (OpenAI /v1)
+  -> Open WebUI / OpenAI:  OPENAI_API_BASE_URL=http://192.168.1.42:8080/v1   (API key: any)
+  -> test:                 curl http://192.168.1.42:8080/v1/models
+```
+
+The same is one keypress away in the **`kiln`** menu → **Connect a web UI** (it shows the
+base URL and a ready-to-paste `docker run`), and `kiln-doctor` prints it too. Copy from
+there instead of the `<board-ip>` placeholders below.
 
 ## 2. Open WebUI (the ChatGPT-style web page)
 

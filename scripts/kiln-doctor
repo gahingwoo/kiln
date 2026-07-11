@@ -153,6 +153,24 @@ if [ -n "$VISR" ] && [ -f "$VISR" ]; then
 fi
 info "the LLM .rkllm must match librkllmrt 1.2.0 (checked by the runtime at load; a mismatch fails init)"
 
+# --- API server (kiln-serve) -----------------------------------------------
+hdr "API server (kiln-serve)"
+SRVHOST="$(ini_get server host)"; [ -n "$SRVHOST" ] || SRVHOST=0.0.0.0
+SRVPORT="$(ini_get server port)"; [ -n "$SRVPORT" ] || SRVPORT=8080
+BIP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1);exit}}')"
+[ -n "$BIP" ] || BIP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+case "$SRVHOST" in
+	127.0.0.1|localhost)
+		warn "[server] host = $SRVHOST -- kiln-serve accepts LOCAL connections only. To use Open WebUI / connect from another machine, set host = 0.0.0.0 (kiln-config -> Server)" ;;
+	*)  ok "[server] listens on $SRVHOST:$SRVPORT -- reachable from the LAN" ;;
+esac
+if { command -v systemctl >/dev/null 2>&1 && systemctl is-active kiln-serve >/dev/null 2>&1; } || pgrep -x kiln-serve >/dev/null 2>&1; then
+	case "$SRVHOST" in 127.0.0.1|localhost) CIP=127.0.0.1 ;; *) CIP="${BIP:-<board-ip>}" ;; esac
+	ok "kiln-serve running -> Open WebUI base URL: http://$CIP:$SRVPORT/v1  (API key: any; see docs/OPENWEBUI.md)"
+else
+	info "kiln-serve not running (start it: kiln serve, or kiln-config -> Server -> service)"
+fi
+
 # --- wifi (rk3576 aic8800) -------------------------------------------------
 hdr "Network (onboard wifi is optional -- ethernet always works)"
 if [ -d /sys/class/net ]; then
