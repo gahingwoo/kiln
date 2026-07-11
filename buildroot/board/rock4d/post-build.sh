@@ -71,10 +71,11 @@ build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin
 [ -f "$DL/librknnrt.so" ] && install -D -m0644 "$DL/librknnrt.so" "$TARGET_DIR/usr/lib/librknnrt.so"
 
 # kiln-doctor (POSIX sh, works on busybox) + kiln-config (needs whiptail; degrades
-# gracefully if it's not in the image) -- same diagnostic/config tools as the
-# Armbian installer. kiln-chat/kiln-vision and the login MOTD come from the rootfs
-# overlay (buildroot/rootfs/); these two live in scripts/, so install them here.
-for t in kiln-doctor kiln-config; do
+# gracefully if it's not in the image) + kiln-convert (on-board model conversion;
+# needs python3-venv + network at convert time) -- same diagnostic/config/convert
+# tools as the Armbian installer. kiln-chat/kiln-vision and the login MOTD come from
+# the rootfs overlay (buildroot/rootfs/); these live in scripts/, so install here.
+for t in kiln-doctor kiln-config kiln-convert; do
 	[ -f "$KILN/scripts/$t" ] && install -D -m0755 "$KILN/scripts/$t" "$TARGET_DIR/usr/bin/$t" \
 		&& echo "[kiln] installed $t -> /usr/bin/"
 done

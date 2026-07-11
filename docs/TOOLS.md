@@ -1,8 +1,9 @@
-# kiln-doctor & kiln-config
+# kiln-doctor, kiln-config & kiln-convert
 
-Two helpers installed to `/usr/bin` alongside `kiln-chat` / `kiln-vision` /
-`kiln-serve`: a health check and a config TUI. Both read the same
-`/etc/kiln/config.ini` (see [`CONFIG.md`](CONFIG.md)).
+Three helpers installed to `/usr/bin` alongside `kiln-chat` / `kiln-vision` /
+`kiln-serve`: a health check, a config TUI, and an on-board model converter. The
+first two read the same `/etc/kiln/config.ini` (see [`CONFIG.md`](CONFIG.md)); the
+third builds a `.rknn` on the board and can point the config at it.
 
 ## kiln-doctor — health check
 
@@ -25,7 +26,7 @@ What it checks:
   (`mmu enable_all … st=0x19/0x19/0x19/0x19`) and flags the power-domain wedge
   (`failed to get pm runtime for npu0, ret: -110`).
 - **Runtimes** — `librkllmrt` / `librknnrt` in `/usr/lib` (+ reported versions).
-- **Tools** — `kiln-chat` / `kiln-vision` / `kiln-config` / the demos on `PATH`.
+- **Tools** — `kiln-chat` / `kiln-vision` / `kiln-config` / `kiln-convert` / the demos on `PATH`.
 - **Models** — the `[llm]` / `[vision]` models from the config exist on disk, and the
   vision `.rknn`'s embedded `rknn-toolkit2` version matches the `librknnrt` 2.3.x
   runtime (a mismatch throws `std::out_of_range` in `rknn_inputs_set`).
@@ -46,24 +47,54 @@ Top menu:
 
 | page | what |
 |---|---|
-| **Status & Diagnostics** | runs `kiln-doctor`, renders the ✓/✗ report, with a Re-run button |
-| **LLM Settings** | `[llm]` — model (picker), temperature, top_k/top_p, max_new_tokens, max_context_len, repeat_penalty, keep_history, system_prompt |
-| **Vision Settings** | `[vision]` — task, model (picker), labels, top_n, core_mask, priority, and detection conf/nms |
+| **Status** | runs `kiln-doctor`, renders the ✓/✗ report, with a Re-run button |
+| **LLM** | `[llm]` — model (picker), temperature, top_k/top_p, max_new_tokens, max_context_len, repeat_penalty, keep_history, system_prompt |
+| **Vision** | `[vision]` — task (classify/detect), model (picker), labels (picker), top_n, detector/conf/nms, core_mask, priority |
 | **Server** | `[server]` host/port + `systemctl` control of `kiln-serve` |
-| **Models** | list / inspect (sizes, `.rknn` toolkit version), set the active LLM/vision model, add-from-path, remove |
-| **Advanced** | reload `rknpu`, rebuild the DKMS driver + restore wifi, re-run the installer — each behind a yes/no confirm |
+| **Models** | **Get/convert** (runs `kiln-convert`), set the active LLM/vision model, list / inspect (sizes, `.rknn` toolkit version), add-from-path, remove |
+| **System** | reload `rknpu`, rebuild the DKMS driver + restore wifi, update Kiln, check for a kernel update — each behind a yes/no confirm |
 
 Conventions:
 
 - **`<Save>` writes, `<Back>` discards** — nothing is persisted until you confirm, so
   a wrong turn never corrupts the config.
-- **Model pickers scan `/opt/models`** — pick a `*.rkllm` / `*.rknn` from a menu
-  instead of typing a path.
+- **File pickers scan `/opt/models`** — pick a `*.rkllm` / `*.rknn` model or a `*.txt`
+  labels file from a menu instead of typing a path.
 - **Enums are radio lists** — `core_mask` (`auto`/`0`/`1`/`0_1`), `priority`
-  (`high`/`medium`/`low`), `keep_history` (`1`/`0`).
-- **Vision defaults to classification.** An **experimental** `task = detect`
-  (YOLOv8/11, unverified on hardware — boxes may be wrong) can be enabled on the
-  Vision page; the picker warns and points at [`../VISION.md`](../VISION.md). Kiln
-  does not claim working detection.
+  (`high`/`medium`/`low`), `keep_history` (`1`/`0`), `detector` family.
+- **Vision does classify (default) or detect (YOLO).** Switching to `task = detect`
+  offers to point labels at COCO-80 and notes the export/licensing rules (NMS-off
+  export, Ultralytics AGPL vs YOLOX Apache); see [`../VISION.md`](../VISION.md). No
+  detector on disk? **Models → Get/convert** builds a YOLOv8n for you.
 - Most changes apply the **next time** you start `kiln-chat` / `kiln-vision` /
-  `kiln-serve`; Advanced driver actions may need a reload or reboot (stated per action).
+  `kiln-serve`; System driver actions may need a reload or reboot (stated per action).
+
+## kiln-convert — get / convert a model on the board
+
+`kiln-convert` turns an ONNX into a version-matched `.rknn` **on the board** — no x86
+dev machine, no manual `rknn-toolkit2` setup, no scp. On first use it builds a private
+`rknn-toolkit2` venv under `/opt/kiln/rknn-venv`, **pinned to your installed
+`librknnrt`** (a mismatched toolkit produces a `.rknn` that throws `std::out_of_range`
+at load, so it refuses to install a different version). That first run downloads a few
+hundred MB and takes a few minutes; later conversions are quick.
+
+```sh
+kiln-convert mobilenet            # pull MobileNetV2 (Apache-2.0) + convert -> classify
+kiln-convert yolov8n              # pull YOLOv8n (Ultralytics AGPL-3.0! asks first) -> detect
+kiln-convert ./my_model.onnx      # convert a local ONNX (type guessed from the name)
+kiln-convert https://host/m.onnx  # download + convert
+kiln-convert https://host/m.rknn  # just place a pre-converted .rknn into /opt/models
+kiln-convert mobilenet --set-active   # ...and point /etc/kiln/config.ini at the result
+```
+
+Source can be a **model-zoo shortcut** (`mobilenet` / `yolov8n`, fetched from
+`airockchip/rknn_model_zoo`), a **URL**, or a **local path**. Presets set the
+normalization (`mobilenet`: ImageNet mean/std; `yolo`: `0..255`); override with
+`--type` / `--mean` / `--std`. Default is fp16; `--quant --dataset FILE` does INT8 with
+a calibration list. `--set-active` writes the model (and, for YOLO, `task = detect` +
+COCO labels) into the config. See `kiln-convert --help` and [`../VISION.md`](../VISION.md).
+
+> **Licensing.** Kiln bundles no models. `mobilenet` is Apache-2.0 (clean). `yolov8n`
+> pulls Ultralytics weights, which are **AGPL-3.0** — `kiln-convert` shows a notice and
+> asks before fetching. YOLOX (Apache-2.0) is a permissive alternative: point
+> `kiln-convert` at a YOLOX ONNX by URL/path.

@@ -19,6 +19,14 @@ also a useful, fast, deterministic workload for probing the NPU next to the LLM.
 
 ## You provide the model — and it must be version-matched
 
+**The easy way — `kiln-convert`.** On the board, `kiln-convert mobilenet` pulls the
+MobileNetV2 ONNX (Apache-2.0) and converts it to a version-matched `.rknn` into
+`/opt/models` for you; `kiln-convert yolov8n` does the same for a YOLOv8n detector
+(Ultralytics AGPL — it asks first). It builds a private `rknn-toolkit2` venv on first
+use, **pinned to your installed `librknnrt`** so there's no version-lock crash — no
+x86 host, no manual toolkit install, no scp. `kiln-config → Models → Get/convert`
+is the same thing with a menu. Everything below is the manual recipe it automates.
+
 Rockchip ships the MobileNet **ONNX**, not a pre-converted RK3576 `.rknn`, so
 convert it once yourself — **on the board (aarch64) or an x86 host**. As of
 `rknn-toolkit2` **2.3.2** the full conversion toolkit ships native aarch64 wheels,
@@ -110,15 +118,17 @@ picks the family from the output shapes; force it with
 > output. (If you only have an end2end `.onnx`, you can cut the graph at the
 > pre-NMS tensor — for Ultralytics that's the `Transpose` output `[1, N, 84]`.)
 
-What's **verified on the host** (unit tests, no NPU): the letterbox preprocessing +
-its inverse box mapping, IoU, per-class NMS, box drawing, AND all three per-branch
-decoders — planted synthetic tensors decode to the expected boxes (the decode math
-mirrors `airockchip/rknn_model_zoo`). What **still needs on-board verification**:
-that a *real* converted `.rknn`'s output layout matches what the decoders assume —
-the output ordering, NCHW dims, the family/num-class inference — end-to-end on a
-board. So boxes from a real model may still be wrong until that's checked.
+What's verified: **YOLOv8n runs end-to-end on a ROCK 4D** (bicycle/truck/dog on the
+dog-bike-car image, ~37 ms), and on the host (unit tests, no NPU) the letterbox
+preprocessing + its inverse box mapping, IoU, per-class NMS, box drawing, and all
+per-branch decoders — planted synthetic tensors decode to the expected boxes (the
+decode math mirrors `airockchip/rknn_model_zoo`). A *different* family/export
+(YOLOv5/v7 anchors, YOLOX, a yolo-raw export) is tested on fewer models, so treat a
+new one as "confirm it once" — check the printed family + first boxes against a known
+image.
 
-To try it (you supply the model — Kiln ships none):
+To try it, build a detector on the board with `kiln-convert yolov8n` (or supply your
+own `.rknn` — Kiln ships none):
 
 ```ini
 [vision]
@@ -130,21 +140,21 @@ conf_threshold = 0.25
 nms_iou = 0.45
 ```
 
-Then `kiln-vision image.jpg [out.jpg]` prints boxes (with an "experimental/unverified"
-banner) and, given a second image path, saves `out.jpg` with the boxes drawn on it;
-`kiln-serve` exposes `POST /v1/vision/detect`; and `kiln-config` → Vision flips the
-task. Convert the `.rknn` the same way as classification (`rknn-toolkit2` **2.3.2**,
-on the board or an x86 host).
+Then `kiln-vision image.jpg [out.jpg]` prints boxes and, given a second image path,
+saves `out.jpg` with the boxes drawn on it; `kiln-serve` exposes
+`POST /v1/vision/detect`; and `kiln-config` → Vision flips the task. Build the `.rknn`
+with `kiln-convert` (which pins `rknn-toolkit2` to your runtime), or convert it the
+same way as classification on an x86 host.
 
 **Licensing (important — Kiln bundles no models, you supply them):** Ultralytics
 **YOLOv5 / YOLOv8 / YOLO11 are AGPL-3.0**; deploying `kiln-serve` publicly with one
 may carry AGPL network-use obligations. **YOLOX is Apache-2.0** (permissive) and is
 a clean alternative if you want to avoid AGPL — and its decode head is implemented.
 
-**To finish it** (roadmap): verify + tune the decode on-board against a known model
-and image (the one board-only gap); confirm/adjust the `auto` family + output-order
-assumptions per real export; the int8-gating speed optimization (the foundation reads
-floats for correctness); and text labels on the drawn overlay (boxes are drawn now).
+**Roadmap:** confirm/adjust the `auto` family + output-order assumptions on the other
+exports (v5/v7 anchors, YOLOX, yolo-raw) as they're tried; the int8-gating speed
+optimization (the foundation reads floats for correctness); and class-name text on the
+drawn overlay (boxes are drawn now, labels are printed to the console).
 
 ## Why "control experiment"
 

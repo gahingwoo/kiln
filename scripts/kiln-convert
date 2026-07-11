@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+# kiln-convert -- one command to GET and CONVERT a model to a RK3576/RK3568 .rknn,
+# ON THE BOARD. No x86 dev machine, no manual rknn-toolkit2 dance, no scp.
+#
+# It does three things, in one pass:
+#   1. finds/builds a matching rknn-toolkit2 (aarch64) in a private venv,
+#   2. gets the source ONNX (a model-zoo shortcut, a URL, or a local file),
+#   3. converts it to a .rknn and drops it in /opt/models.
+#
+# The toolkit version is PINNED to the installed librknnrt (2.3.x): a mismatch
+# makes the .rknn throw std::out_of_range at load, so kiln-convert refuses to
+# silently install a different version.
+#
+# Usage:
+#   kiln-convert mobilenet                 # pull MobileNetV2 (Apache-2.0) + convert -> classify
+#   kiln-convert yolov8n                   # pull YOLOv8n (Ultralytics AGPL-3.0!) + convert -> detect
+#   kiln-convert ./my_model.onnx           # convert a local ONNX (type guessed from the name)
+#   kiln-convert https://host/m.onnx       # download + convert
+#   kiln-convert https://host/m.rknn       # just download a pre-converted .rknn into /opt/models
+#
+# Options:
+#   --type mobilenet|yolo|classify|generic   normalization preset (default: guessed)
+#   --out PATH            output .rknn (default: /opt/models/<name>_<platform>.rknn)
+#   --platform rk3576|rk3568   target SoC (default: from the device-tree)
+#   --mean "a,b,c" --std "a,b,c"   override the preset's normalization
+#   --quant --dataset FILE   INT8 quantization (needs a calibration image list; default is fp16)
+#   --toolkit-ver X.Y.Z  force the rknn-toolkit2 version (default: match librknnrt)
+#   --wheel PATH|URL     install rknn-toolkit2 from this wheel instead of PyPI
+#   --set-active         after converting, point /etc/kiln/config.ini at the result
+#   -y, --yes            assume "yes" (AGPL confirmation, overwrite) -- for scripting
+#   --install-only       just bootstrap the toolkit venv, don't convert
+#
+# Env: KILN_MODELS_DIR (/opt/models), KILN_RKNN_VENV (/opt/kiln/rknn-venv),
+#      KILN_CONFIG (/etc/kiln/config.ini), KILN_TOOLKIT_VER, KILN_RKNN_WHEEL.
+set -euo pipefail
+
+MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
+VENV="${KILN_RKNN_VENV:-/opt/kiln/rknn-venv}"
+CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
+ZOO="${KILN_ZOO_REPO:-https://github.com/airockchip/rknn_model_zoo.git}"
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+
+# colour on a tty
+if [ -t 1 ]; then C_C=$(printf '\033[1;36m'); C_R=$(printf '\033[1;31m'); C_Y=$(printf '\033[33m'); C_0=$(printf '\033[0m'); else C_C=; C_R=; C_Y=; C_0=; fi
+say(){ printf '\n%s[kiln-convert]%s %s\n' "$C_C" "$C_0" "$*"; }
+warn(){ printf '%s[kiln-convert] WARN:%s %s\n' "$C_Y" "$C_0" "$*" >&2; }
+die(){ printf '\n%s[kiln-convert] ERROR:%s %s\n' "$C_R" "$C_0" "$*" >&2; exit 1; }
+
+usage(){ sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+# --- platform (target SoC) from the running device-tree --------------------
+DT=""; [ -r /proc/device-tree/compatible ] && DT="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null || true)"
+case "$DT" in *rk3568*) PLATFORM=rk3568;; *) PLATFORM=rk3576;; esac
+
+# --- toolkit version: MATCH the installed runtime -------------------------
+runtime_ver(){ strings /usr/lib/librknnrt.so 2>/dev/null | grep -oE 'librknnrt version:? [0-9.]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+TKVER="${KILN_TOOLKIT_VER:-$(runtime_ver || true)}"; [ -n "$TKVER" ] || TKVER=2.3.0
+WHEEL="${KILN_RKNN_WHEEL:-}"
+
+# --- args ------------------------------------------------------------------
+TYPE=""; OUT=""; MEAN=""; STD=""; QUANT=0; DATASET=""; YES=0; SET_ACTIVE=0; INSTALL_ONLY=0
+SRC=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-h|--help) usage 0 ;;
+		--type) TYPE="$2"; shift 2 ;;
+		--out) OUT="$2"; shift 2 ;;
+		--platform) PLATFORM="$2"; shift 2 ;;
+		--mean) MEAN="$2"; shift 2 ;;
+		--std) STD="$2"; shift 2 ;;
+		--quant) QUANT=1; shift ;;
+		--dataset) DATASET="$2"; shift 2 ;;
+		--toolkit-ver) TKVER="$2"; shift 2 ;;
+		--wheel) WHEEL="$2"; shift 2 ;;
+		--set-active) SET_ACTIVE=1; shift ;;
+		-y|--yes) YES=1; shift ;;
+		--install-only) INSTALL_ONLY=1; shift ;;
+		-*) die "unknown option: $1 (try --help)" ;;
+		*) [ -z "$SRC" ] && SRC="$1" || die "unexpected extra argument: $1"; shift ;;
+	esac
+done
+
+confirm(){ [ "$YES" = 1 ] && return 0; printf '%s [y/N] ' "$1"; read -r a </dev/tty || return 1; case "$a" in y|Y|yes|YES) return 0;; *) return 1;; esac; }
+
+# --- toolkit bootstrap (private venv, pinned) ------------------------------
+ensure_toolkit(){
+	if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c 'import rknn.api' 2>/dev/null; then
+		say "rknn-toolkit2 ready ($VENV)"; return 0
+	fi
+	command -v python3 >/dev/null 2>&1 || die "python3 not found (sudo apt install python3 python3-venv)"
+	python3 -c 'import venv' 2>/dev/null || die "python3-venv not found (sudo apt install python3-venv)"
+	say "setting up rknn-toolkit2 $TKVER in $VENV (first run only -- downloads a few hundred MB, a few minutes) ..."
+	if [ ! -w "$(dirname "$VENV")" ] && [ ! -d "$VENV" ]; then $SUDO mkdir -p "$(dirname "$VENV")"; $SUDO chown "$(id -u):$(id -g)" "$(dirname "$VENV")" 2>/dev/null || true; fi
+	python3 -m venv "$VENV" || die "couldn't create the venv at $VENV"
+	"$VENV/bin/pip" install -q -U pip 'setuptools<81' wheel || die "pip bootstrap failed"   # <81: toolkit still imports pkg_resources
+	if [ -n "$WHEEL" ]; then
+		"$VENV/bin/pip" install -q "$WHEEL" || die "installing the toolkit wheel failed: $WHEEL"
+	elif ! "$VENV/bin/pip" install -q "rknn-toolkit2==$TKVER"; then
+		die "couldn't install rknn-toolkit2==$TKVER from PyPI (it may have no aarch64 wheel there).
+       The version MUST match librknnrt $TKVER or the .rknn crashes at load, so I won't
+       install a different one. Get the matching aarch64 wheel from
+         https://github.com/airockchip/rknn-toolkit2  (rknn-toolkit2/packages/)
+       and re-run:  kiln-convert --wheel /path/to/rknn_toolkit2-$TKVER-*.whl $SRC"
+	fi
+	"$VENV/bin/python" -c 'import rknn.api' 2>/dev/null || die "rknn-toolkit2 installed but 'import rknn.api' fails -- check the venv"
+	say "rknn-toolkit2 ready."
+}
+
+# --- get the source ONNX (model-zoo shortcut / URL / local) ----------------
+# echoes the local path to the ONNX (or .rknn) to convert/place; sets $TYPE if known.
+TMP=""; cleanup(){ [ -n "$TMP" ] && rm -rf "$TMP"; }; trap cleanup EXIT
+new_tmp(){ [ -n "$TMP" ] || TMP="$(mktemp -d)"; }
+
+# sparse-clone one rknn_model_zoo example and run its download_model.sh -> echo the onnx
+zoo_pull(){  # $1 = example dir under examples/, e.g. mobilenet | yolov8
+	new_tmp
+	say "fetching the $1 ONNX from rknn_model_zoo (airockchip) ..."
+	git clone --filter=blob:none --sparse --depth 1 "$ZOO" "$TMP/z" >/dev/null 2>&1 || die "couldn't clone rknn_model_zoo (need network)"
+	( cd "$TMP/z" && git sparse-checkout set "examples/$1" >/dev/null 2>&1 ) || die "sparse-checkout examples/$1 failed"
+	local md="$TMP/z/examples/$1/model"
+	[ -f "$md/download_model.sh" ] || die "no download_model.sh in examples/$1 (model zoo layout changed?)"
+	( cd "$md" && bash download_model.sh ) >/dev/null 2>&1 || die "the example's download_model.sh failed (need network)"
+	local onnx; onnx="$(ls "$md"/*.onnx 2>/dev/null | head -1)"
+	[ -f "$onnx" ] || die "no .onnx appeared after downloading examples/$1"
+	echo "$onnx"
+}
+
+resolve_source(){
+	case "$SRC" in
+		mobilenet|mobilenetv2|classify-demo)
+			[ -n "$TYPE" ] || TYPE=mobilenet
+			SRC_PATH="$(zoo_pull mobilenet)" ;;
+		yolo|yolov8|yolov8n|detect-demo)
+			[ -n "$TYPE" ] || TYPE=yolo
+			say "YOLOv8 weights are ${C_Y}Ultralytics YOLO -- AGPL-3.0${C_0}. Kiln bundles no models; this"
+			printf '           downloads it to YOUR board for your use. Deploying kiln-serve publicly with\n'
+			printf '           an AGPL model may carry network-use obligations. YOLOX (Apache-2.0) is a\n'
+			printf '           permissive alternative -- point kiln-convert at a YOLOX ONNX instead.\n'
+			confirm "Pull the Ultralytics YOLOv8n ONNX anyway?" || die "cancelled (no AGPL model fetched)."
+			SRC_PATH="$(zoo_pull yolov8)" ;;
+		http://*|https://*)
+			new_tmp
+			local base; base="$(basename "${SRC%%\?*}")"; [ -n "$base" ] || base="model.onnx"
+			say "downloading $SRC ..."
+			curl -fL --connect-timeout 8 "$SRC" -o "$TMP/$base" || die "download failed: $SRC"
+			[ -s "$TMP/$base" ] || die "downloaded file is empty: $SRC"
+			SRC_PATH="$TMP/$base" ;;
+		"") die "no source given. Try:  kiln-convert mobilenet   |   kiln-convert ./model.onnx   (--help)" ;;
+		*)
+			[ -f "$SRC" ] || die "not a file, URL, or known shortcut: $SRC"
+			SRC_PATH="$SRC" ;;
+	esac
+}
+
+# --- normalization preset from --type / a name guess ----------------------
+guess_type(){
+	local n; n="$(basename "$SRC_PATH" | tr 'A-Z' 'a-z')"
+	case "$n" in
+		*yolo*|*yolox*) echo yolo ;;
+		*mobilenet*|*resnet*|*efficientnet*|*squeezenet*|*inception*|*vgg*|*densenet*) echo mobilenet ;;
+		*) echo "" ;;
+	esac
+}
+apply_preset(){
+	[ -n "$TYPE" ] || TYPE="$(guess_type)"
+	case "$TYPE" in
+		mobilenet|classify)
+			[ -n "$MEAN" ] || MEAN="123.675,116.28,103.53"
+			[ -n "$STD" ]  || STD="58.395,57.12,57.375" ;;
+		yolo|detect)
+			[ -n "$MEAN" ] || MEAN="0,0,0"
+			[ -n "$STD" ]  || STD="255,255,255" ;;
+		generic|"")
+			[ -n "$MEAN" ] || MEAN="0,0,0"
+			[ -n "$STD" ]  || STD="255,255,255"
+			[ -n "$TYPE" ] || TYPE=generic
+			warn "couldn't tell classify from detect for '$(basename "$SRC_PATH")' -- using generic mean=$MEAN std=$STD. Pass --type or --mean/--std if the model needs different normalization." ;;
+		*) die "unknown --type '$TYPE' (mobilenet|classify|yolo|detect|generic)" ;;
+	esac
+}
+
+# --- run the conversion ----------------------------------------------------
+convert(){
+	[ "$QUANT" = 1 ] && [ -z "$DATASET" ] && die "--quant needs --dataset FILE (a text file listing calibration images, one per line). Omit --quant for fp16 (what Kiln's shipped models use)."
+	local name base tmp_out
+	base="$(basename "$SRC_PATH")"; name="${base%.*}"
+	[ -n "$OUT" ] || OUT="$MODELS_DIR/${name}_${PLATFORM}.rknn"
+	new_tmp; tmp_out="$TMP/out.rknn"
+	# JSON contract for the embedded python (keeps quoting sane).
+	local mj sj cfg
+	mj="[$MEAN]"; sj="[$STD]"
+	local q=false; [ "$QUANT" = 1 ] && q=true   # JSON booleans are lower-case
+	local ds=null; [ -n "$DATASET" ] && ds="\"$DATASET\""
+	cfg="{\"onnx\":\"$SRC_PATH\",\"out\":\"$tmp_out\",\"platform\":\"$PLATFORM\",\"mean\":$mj,\"std\":$sj,\"quant\":$q,\"dataset\":$ds}"
+	say "converting -> $OUT   (type=$TYPE, platform=$PLATFORM, mean=$MEAN std=$STD, $([ "$QUANT" = 1 ] && echo INT8 || echo fp16))"
+	"$VENV/bin/python" - "$cfg" <<'PY' || die "conversion failed (see the rknn-toolkit2 output above)"
+import sys, json
+cfg = json.loads(sys.argv[1])
+from rknn.api import RKNN
+r = RKNN(verbose=True)
+r.config(mean_values=[cfg['mean']], std_values=[cfg['std']], target_platform=cfg['platform'])
+if r.load_onnx(model=cfg['onnx']) != 0:
+    sys.exit('load_onnx failed')
+if r.build(do_quantization=cfg['quant'], dataset=cfg.get('dataset')) != 0:
+    sys.exit('build failed')
+if r.export_rknn(cfg['out']) != 0:
+    sys.exit('export_rknn failed')
+print('conversion OK')
+PY
+	[ -s "$tmp_out" ] || die "conversion reported success but produced no .rknn"
+	# place it (models dir is root-owned)
+	$SUDO mkdir -p "$(dirname "$OUT")"
+	if [ -e "$OUT" ] && [ "$YES" != 1 ]; then confirm "Overwrite $OUT?" || die "kept the existing $OUT (converted file is at $tmp_out)"; fi
+	$SUDO install -m0644 "$tmp_out" "$OUT" || die "couldn't write $OUT (permissions?)"
+	say "done -> $OUT  ($(du -h "$OUT" 2>/dev/null | cut -f1))"
+}
+
+# --- optionally point config.ini at the fresh model ------------------------
+ini_set(){  # f sec key val  -- present->replace / absent->append to the right section
+	local f=$1 sec=$2 key=$3 val=$4 t; [ -f "$f" ] || $SUDO sh -c ": > '$f'"
+	t="$(mktemp)"
+	awk -v section="$sec" -v key="$key" -v value="$val" '
+		BEGIN{in_t=0;done=0}
+		/^[ \t]*\[.*\][ \t]*$/{ if(in_t&&!done){print key" = "value;done=1} h=$0;sub(/^[ \t]*\[/,"",h);sub(/\][ \t]*$/,"",h);in_t=(h==section);print;next }
+		in_t&&!done{ if(match($0,/^[ \t]*[^=]*=/)){n=substr($0,1,RLENGTH-1);gsub(/^[ \t]+|[ \t]+$/,"",n); if(n==key){print key" = "value;done=1;next}} }
+		{print}
+		END{ if(!done){ if(in_t)print key" = "value; else{ if(NR>0)print ""; print "["section"]"; print key" = "value } } }' "$f" > "$t"
+	$SUDO cp "$t" "$f"; rm -f "$t"
+}
+set_active(){
+	case "$TYPE" in
+		yolo|detect)
+			say "pointing $CONF [vision] at the detector (task=detect)"
+			ini_set "$CONF" vision model "$OUT"; ini_set "$CONF" vision task detect
+			[ -f "$MODELS_DIR/coco_80_labels.txt" ] && ini_set "$CONF" vision labels "$MODELS_DIR/coco_80_labels.txt" ;;
+		*)
+			say "pointing $CONF [vision] at the classifier (task=classify)"
+			ini_set "$CONF" vision model "$OUT"; ini_set "$CONF" vision task classify
+			[ -f "$MODELS_DIR/imagenet_labels.txt" ] && ini_set "$CONF" vision labels "$MODELS_DIR/imagenet_labels.txt" ;;
+	esac
+}
+
+# ============================ main ========================================
+if [ "$INSTALL_ONLY" = 1 ]; then ensure_toolkit; say "toolkit only -- nothing to convert."; exit 0; fi
+
+resolve_source
+
+# a .rknn source is not a conversion: just place it (download-a-prebuilt path).
+case "$SRC_PATH" in
+	*.rknn)
+		base="$(basename "$SRC_PATH")"; [ -n "$OUT" ] || OUT="$MODELS_DIR/$base"
+		$SUDO mkdir -p "$(dirname "$OUT")"
+		$SUDO install -m0644 "$SRC_PATH" "$OUT" || die "couldn't write $OUT"
+		say "placed pre-converted model -> $OUT"
+		rv="$(strings "$OUT" 2>/dev/null | grep -oE '"version":"[0-9.]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+		[ -n "$rv" ] && case "$rv" in "$TKVER"|2.3.*) : ;; *) warn "this .rknn was built with rknn-toolkit2 $rv but the runtime is librknnrt $TKVER -- it may throw std::out_of_range at load.";; esac
+		[ "$SET_ACTIVE" = 1 ] && { TYPE="${TYPE:-generic}"; set_active; }
+		say "try it:  kiln-vision <image.jpg>"
+		exit 0 ;;
+esac
+
+apply_preset
+ensure_toolkit
+convert
+[ "$SET_ACTIVE" = 1 ] && set_active
+
+cat <<EOF
+
+Next:
+  kiln-vision <image.jpg>          # run it ($([ "$TYPE" = yolo ] || [ "$TYPE" = detect ] && echo 'detection: kiln-vision img.jpg out.jpg saves boxes' || echo 'classification: top-N labels'))
+  kiln-config -> Vision            # set task/labels/model, or re-run with --set-active
+EOF

@@ -30,7 +30,7 @@ else
 	echo "[kiln] -> model/test.jpg  and  model/imagenet_labels.txt ($(wc -l < "$MODEL/imagenet_labels.txt") classes)"
 fi
 
-# COCO-80 class labels for the EXPERIMENTAL detection path (task=detect). The class
+# COCO-80 class labels for the detection path (task=detect). The class
 # names are a public factual list, generated inline (no network) so it's always here.
 # Idempotent. Point [vision] labels at this when you switch to a YOLO detector.
 if [ ! -s "$MODEL/coco_80_labels.txt" ]; then
@@ -142,8 +142,12 @@ fi
 
 cat <<'EOF'
 
-[kiln] You still need a MobileNet .rknn for RK3576. Convert it once with
-       rknn-toolkit2 2.3.2 -- on THIS board (aarch64) or an x86 host; 2.3.2 ships
+[kiln] You still need a MobileNet .rknn for RK3576. The easy way, on the board:
+
+           kiln-convert mobilenet --set-active
+
+       (pulls the ONNX + converts it + points the config at it). Or do it by hand
+       with rknn-toolkit2 2.3.x -- on THIS board (aarch64) or an x86 host; it ships
        native aarch64 wheels, so no x86 box is required. Get mobilenetv2-12.onnx
        via examples/mobilenet/model/download_model.sh, then roughly:
 

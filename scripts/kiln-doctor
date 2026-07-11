@@ -95,7 +95,7 @@ if [ -f /usr/lib/librknnrt.so ]; then ok "librknnrt.so   $(sover /usr/lib/librkn
 
 # --- tools -----------------------------------------------------------------
 hdr "Tools"
-for t in kiln-chat kiln-vision kiln-config rkllm_demo rknn_mobilenet; do
+for t in kiln-chat kiln-vision kiln-config kiln-convert rkllm_demo rknn_mobilenet; do
 	if command -v "$t" >/dev/null 2>&1; then ok "$t"; else warn "$t not installed in PATH"; fi
 done
 
@@ -106,7 +106,7 @@ LLM="$(ini_get llm model)"
 VIS="$(ini_get vision model)"
 LAB="$(ini_get vision labels)"
 VTASK="$(ini_get vision task)"; [ -n "$VTASK" ] || VTASK=classify
-[ "$VTASK" = detect ] && warn "[vision] task = detect is EXPERIMENTAL (YOLOv8/11, unverified) -- boxes may be wrong; classify is the supported path"
+[ "$VTASK" = detect ] && info "[vision] task = detect (YOLO): make sure the .rknn is a YOLO detector exported with NMS OFF, and labels point at COCO-80 (not ImageNet)"
 # LLM is auto-discovered (Kiln hard-codes no model): use the configured one if it
 # exists, else the first *.rkllm in /opt/models. Report what will actually load.
 MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
@@ -126,8 +126,8 @@ fi
 VIS_AUTO="$(ls "$MODELS_DIR"/*.rknn 2>/dev/null | sort | head -1)"
 if [ -n "$VIS" ] && [ -f "$VIS" ]; then VISR="$VIS"; ok "vision model: $VIS"
 elif [ -n "$VIS_AUTO" ]; then VISR="$VIS_AUTO"; ok "vision model: $VIS_AUTO (auto-discovered)"
-elif [ -n "$VIS" ]; then VISR=""; bad "vision model MISSING: $VIS and no *.rknn in $MODELS_DIR -- convert one (VISION.md) or fix it in kiln-config"
-else VISR=""; info "no vision model yet -- put a *.rknn in $MODELS_DIR (classify: MobileNet; detect: a YOLO)"; fi
+elif [ -n "$VIS" ]; then VISR=""; bad "vision model MISSING: $VIS and no *.rknn in $MODELS_DIR -- build one: kiln-convert mobilenet (or kiln-config -> Models -> Get/convert)"
+else VISR=""; info "no vision model yet -- build one on the board: kiln-convert mobilenet (classify) or kiln-convert yolov8n (detect); or drop a *.rknn in $MODELS_DIR"; fi
 [ "$VTASK" = detect ] && [ -n "$VISR" ] && info "task=detect: ensure that .rknn is a YOLO detector, not a classifier"
 if [ -n "$LAB" ] && [ ! -f "$LAB" ]; then warn "vision labels file missing: $LAB"; fi
 # detect uses COCO-80, not ImageNet-1000: flag an oversized labels file for task=detect
@@ -143,7 +143,7 @@ if [ -n "$VISR" ] && [ -f "$VISR" ]; then
 	case "$rv" in
 		"")    info "couldn't read the .rknn converter version (older format?) -- ensure it was built on rknn-toolkit2 2.3.x";;
 		2.3.*) ok "vision model converter rknn-toolkit2 $rv matches librknnrt 2.3.x";;
-		*)     bad "vision model converted with rknn-toolkit2 $rv, but the runtime is librknnrt 2.3.0 -- reconvert on 2.3.x (VISION.md), or it throws std::out_of_range in rknn_inputs_set";;
+		*)     bad "vision model converted with rknn-toolkit2 $rv, but the runtime is librknnrt 2.3.0 -- reconvert on 2.3.x (kiln-convert pins the matching toolkit), or it throws std::out_of_range in rknn_inputs_set";;
 	esac
 fi
 info "the LLM .rkllm must match librkllmrt 1.2.0 (checked by the runtime at load; a mismatch fails init)"

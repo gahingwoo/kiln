@@ -86,6 +86,11 @@ CURL_NET="--connect-timeout 8 --max-time 25"
 say(){ printf '\n\033[1;36m[kiln]\033[0m %s\n' "$*"; }
 die(){ printf '\n\033[1;31m[kiln] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Resolve a sibling Kiln tool: prefer the installed one on PATH, else this repo's
+# scripts/ dir (used by the interactive TUI to hand off to kiln-config/convert/doctor).
+SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "$KILN_DIR/scripts")"
+_tool(){ command -v "$1" 2>/dev/null || { [ -f "$SELF_DIR/$1" ] && echo "$SELF_DIR/$1"; }; }
+
 # Build every registered DKMS module against kernel release $1; remove the ones
 # that don't build (e.g. the aic8800 wifi driver doesn't build on 7.1). A module
 # that fails to build makes the linux-image postinst's 'dkms autoinstall' fail,
@@ -309,6 +314,69 @@ EOF
 	return 0
 }
 
+# Friendly whiptail front-end for INTERACTIVE runs. It only ever sets the same
+# KILN_* env vars you could pass by hand (then the normal text install proceeds --
+# we don't hide the build logs behind a progress bar, since you want to see them if
+# something breaks). Skipped automatically when:
+#   * piped (curl|bash: stdin isn't a tty) or head-less (the phase-2 systemd service),
+#   * whiptail isn't installed yet (first-ever run on a bare system -> text mode),
+#   * you already chose an action via a KILN_* stage flag (scripted; don't nag).
+# On an already-installed board it's an action menu (mostly hands off to kiln-config /
+# kiln-convert); on a fresh board it explains the two-reboot plan and gets consent.
+installer_tui(){
+	[ -t 0 ] && [ -t 1 ] || return 0
+	[ -z "${KILN_NONINTERACTIVE:-}" ] || return 0
+	command -v whiptail >/dev/null 2>&1 || return 0
+	[ -z "${KILN_SKIP_KERNEL:-}${KILN_SKIP_DRIVER:-}${KILN_SKIP_RUNTIMES:-}${KILN_SKIP_REPO:-}${KILN_CHECK_KERNEL:-}${KILN_FORCE_KERNEL:-}${KILN_MANUAL:-}" ] || return 0
+	local BT="Kiln installer  ·  $SOC / $BOARD  ·  LLM + vision on the RK3576 NPU"
+	local cfg conv doc; cfg="$(_tool kiln-config)"; conv="$(_tool kiln-convert)"; doc="$(_tool kiln-doctor)"
+	if [ -f /etc/kiln/phase2-done ]; then
+		local a
+		a=$(whiptail --backtitle "$BT" --title "Kiln is installed on this board" --menu \
+			"What would you like to do?  (Settings live in kiln-config; this just runs the installer's actions.)" 20 78 8 -- \
+			config "open kiln-config  (settings · models · diagnostics)" \
+			update "update Kiln: git pull + rebuild driver & runtimes (keep kernel)" \
+			model  "get / convert a model on the board  (kiln-convert)" \
+			driver "rebuild the NPU driver only  (rknpu DKMS)" \
+			kernel "check for a newer Kiln kernel  (may reboot)" \
+			doctor "run diagnostics  (kiln-doctor)" \
+			quit   "quit" 3>&1 1>&2 2>&3) || exit 0
+		case "$a" in
+			config) [ -n "$cfg" ] && exec "$cfg"; return 0 ;;
+			update) return 0 ;;                                   # full run; kernel auto-skipped when installed
+			model)  clear; [ -n "$conv" ] && "$conv" || say "kiln-convert not found"; exit $? ;;
+			driver) export KILN_SKIP_KERNEL=1 KILN_SKIP_RUNTIMES=1; return 0 ;;
+			kernel) export KILN_CHECK_KERNEL=1; return 0 ;;
+			doctor) clear; [ -n "$doc" ] && "$doc" || true; printf '\nPress Enter to exit ...'; read -r _; exit 0 ;;
+			quit|"") exit 0 ;;
+		esac
+	else
+		if whiptail --backtitle "$BT" --title "Install Kiln" --yes-button "Auto (recommended)" --no-button "More options..." --yesno \
+"This installs the Kiln mainline NPU kernel, the LLM + vision runtimes, and restores
+onboard wifi.
+
+AUTO: the board REBOOTS ITSELF TWICE (~10-15 min total) and finishes on its own --
+you'll see \"Kiln installed\" at the next login. Onboard wifi is down between the
+reboots (expected); the offline phase doesn't need it.  DON'T CUT POWER.
+
+Proceed with the automatic install?" 20 78; then
+			return 0
+		fi
+		local m
+		m=$(whiptail --backtitle "$BT" --title "Install options" --menu "How would you like to run the install?" 18 78 5 -- \
+			auto   "automatic: reboot twice, hands-off  (recommended)" \
+			manual "manual: I'll reboot and re-run the installer myself" \
+			model  "just get / convert a model first  (kiln-convert)" \
+			cancel "cancel -- don't install now" 3>&1 1>&2 2>&3) || exit 0
+		case "$m" in
+			auto)   return 0 ;;
+			manual) export KILN_MANUAL=1; return 0 ;;
+			model)  clear; [ -n "$conv" ] && "$conv" || say "kiln-convert not found"; exit $? ;;
+			cancel|"") exit 0 ;;
+		esac
+	fi
+}
+
 # --- 0. preflight -----------------------------------------------------------
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
@@ -316,6 +384,11 @@ say "Kiln installer — RK3576 NPU on Armbian"
 say "detected SoC: $SOC (board $BOARD, kernel release '$KTAG', dtb $DTB)"
 grep -aqi "$SOC" /proc/device-tree/compatible 2>/dev/null \
 	|| say "note: board does not report $SOC in /proc/device-tree/compatible; continuing"
+
+# Interactive front-end (no-op when piped / head-less / scripted). May set KILN_*
+# env vars, hand off to kiln-config/convert/doctor, or exit -- all before we mutate
+# anything, so it's safe here at the top.
+installer_tui
 
 # --- 1. prerequisites -------------------------------------------------------
 # Heal first: a kernel left half-configured by a DKMS module that won't build on
@@ -330,13 +403,15 @@ fi
 # apt-get install would needlessly try the network -- and `|| die` would then abort
 # the whole offline install. Skip it when the prerequisites are already present.
 need_apt=0
-for c in git gcc dkms dtc curl mkimage whiptail; do command -v "$c" >/dev/null 2>&1 || need_apt=1; done
-for p in libreadline-dev libgomp1 ca-certificates; do dpkg -s "$p" >/dev/null 2>&1 || need_apt=1; done
+for c in git gcc dkms dtc curl mkimage whiptail python3; do command -v "$c" >/dev/null 2>&1 || need_apt=1; done
+# python3-venv lets kiln-convert build a private rknn-toolkit2 venv on the board (so
+# converting a model needs no extra manual apt); libs as before.
+for p in libreadline-dev libgomp1 ca-certificates python3-venv; do dpkg -s "$p" >/dev/null 2>&1 || need_apt=1; done
 if [ "$need_apt" = 1 ]; then
 	say "installing prerequisites ..."
 	$SUDO apt-get update -qq || true
 	$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
-		libreadline-dev libgomp1 whiptail \
+		libreadline-dev libgomp1 whiptail python3 python3-venv \
 		|| die "apt failed installing prerequisites (need network for the first run)."
 else
 	say "prerequisites already present — skipping apt."
@@ -571,9 +646,10 @@ else
 	done
 fi
 
-# Diagnostic + config CLIs. Installed UNCONDITIONALLY (tiny, and useful even on a
-# KILN_SKIP_RUNTIMES run) so `kiln-doctor` / `kiln-config` are always on PATH.
-for t in kiln-doctor kiln-config; do
+# Diagnostic + config + model-conversion CLIs. Installed UNCONDITIONALLY (tiny, and
+# useful even on a KILN_SKIP_RUNTIMES run) so they are always on PATH. kiln-convert
+# gets/converts models on the board (rknn-toolkit2 in a private venv, lazily).
+for t in kiln-doctor kiln-config kiln-convert; do
 	[ -f "scripts/$t" ] && $SUDO install -m0755 "scripts/$t" "/usr/bin/$t" || true
 done
 

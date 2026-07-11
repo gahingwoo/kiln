@@ -7,11 +7,11 @@
 # Design rules honored here:
 #   * <Save> writes, <Back> discards -- nothing is persisted until you confirm.
 #   * model pickers SCAN /opt/models (no path typing); enums are radio lists.
-#   * vision defaults to CLASSIFICATION; task=detect is EXPERIMENTAL (unverified) and
-#     labelled as such -- never presented as a working feature.
+#   * vision does classify (default) OR detect (YOLO); Models can GET/CONVERT a
+#     model on the board (kiln-convert) so you never have to scp one in.
 #   * needs root to edit /etc/kiln/config.ini and to read dmesg -> re-exec via sudo.
 #
-# Pages: Status & Diagnostics, LLM Settings, Vision Settings, Server, Models, Advanced.
+# Pages: Status, LLM, Vision, Server, Models (get/convert/set), System.
 
 CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
 MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
@@ -184,7 +184,7 @@ short_sys() { [ -z "$1" ] && echo "(none)" || echo "$(printf '%.24s' "$1")..."; 
 setmod() { eval "cur=\$$1"; [ -n "$2" ] && [ "$2" != "$cur" ] && { eval "$1=\$2"; MOD=1; }; }
 
 # ---------------------------------------------------------------------------
-# 3. Vision Settings ([vision])  -- CLASSIFICATION ONLY
+# 3. Vision Settings ([vision])  -- classify (default) or detect (YOLO)
 # ---------------------------------------------------------------------------
 vision_page() {
 	g() { kiln_ini_get "$CONF" vision "$1"; }
@@ -196,23 +196,23 @@ vision_page() {
 	v_nms=$(g nms_iou); [ -n "$v_nms" ] || v_nms=0.45
 	MOD=0
 	while :; do
-		sel=$(menu "Vision Settings ([vision])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo "task=$v_task (detect = EXPERIMENTAL, unverified)")" \
-			task       "$v_task  (classify | detect=EXPERIMENTAL)" \
+		sel=$(menu "Vision Settings ([vision])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo "task = $v_task")" \
+			task       "$v_task  (classify | detect)" \
 			model      "$(short "$v_model")" \
 			labels     "$(short "$v_labels")" \
-			top_n      "$v_topn  (classify)" \
-			detector   "$v_det  (detect family)" \
-			conf       "$v_conf  (detect score threshold)" \
-			nms_iou    "$v_nms  (detect NMS IoU)" \
-			core_mask  "$v_core" \
-			priority   "$v_prio" \
+			top_n      "$v_topn  (classify: how many labels)" \
+			detector   "$v_det  (detect: YOLO family)" \
+			conf       "$v_conf  (detect: score threshold)" \
+			nms_iou    "$v_nms  (detect: NMS IoU)" \
+			core_mask  "$v_core  (NPU cores)" \
+			priority   "$v_prio  (NPU priority)" \
 			SAVE       "write changes to $CONF" \
 			BACK       "discard & return") || { vis_maybe_back && return; continue; }
 		case "$sel" in
 			task)
 				n=$(radio_pick "Vision task:" "$v_task" classify detect)
 				if [ "$n" = detect ] && [ "$v_task" != detect ]; then
-					msg "Object detection (YOLO). You supply a .rknn exported with NMS OFF -- an end2end / NMS-in-model export crashes the NPU. Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0. See VISION.md."
+					msg "Object detection (YOLO). Point [vision] model at a YOLO .rknn exported with NMS OFF (an end2end / NMS-in-model export crashes the NPU). No detector yet? Models -> Get/convert can build a YOLOv8n for you. Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0."
 					# detection uses COCO-80 labels, not ImageNet -- offer to switch
 					if [ -f "$MODELS_DIR/coco_80_labels.txt" ] && ! echo "$v_labels" | grep -qi coco; then
 						yesno "Detection uses COCO-80 class names, not ImageNet. Switch labels to coco_80_labels.txt?" \
@@ -222,8 +222,8 @@ vision_page() {
 				setmod v_task "$n" ;;
 			model)
 				case "$v_task" in
-					detect) msg "Pick a YOLOv8/11 detection .rknn (EXPERIMENTAL). Convert one with rknn-toolkit2 2.3.2; see VISION.md." ;;
-					*)      msg "Classification: pick a classification .rknn (e.g. MobileNet). Detection is a separate task (set task=detect)." ;;
+					detect) msg "Pick a YOLO detection .rknn (exported with NMS OFF). No detector in $MODELS_DIR yet? Use Models -> Get/convert to build one on the board." ;;
+					*)      msg "Classification: pick a classifier .rknn (e.g. MobileNet). Detection is a separate task (set task=detect)." ;;
 				esac
 				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
 			labels)
@@ -299,24 +299,54 @@ models_page() {
 	while :; do
 		llm=$(kiln_ini_get "$CONF" llm model); vis=$(kiln_ini_get "$CONF" vision model)
 		sel=$(menu "Models ($MODELS_DIR)" "LLM: $(short "$llm")    Vision: $(short "$vis")" \
+			get    "get / convert a model on the board  (kiln-convert) ->" \
 			setllm "set the active LLM model   ([llm] model)" \
 			setvis "set the active vision model ([vision] model)" \
 			list   "list + inspect installed models (sizes, versions)" \
-			add    "add a model from a path (copy into $MODELS_DIR)" \
+			add    "add a model from a local path (copy into $MODELS_DIR)" \
 			remove "remove a model file" \
-			guide  "how to get / convert models" \
+			guide  "how models work (you supply them)" \
 			BACK   "back") || return
 		case "$sel" in
+			get)    models_get ;;
 			setllm) n=$(model_pick rkllm "$llm"); [ "$n" != "$llm" ] && { kiln_ini_set "$CONF" llm model "$n"; msg "[llm] model = ${n:-(unset)}"; } ;;
-			setvis) msg "Vision is CLASSIFICATION-ONLY (top-N labels). Detection / YOLO is not supported -- pick a classification .rknn (e.g. MobileNet)."
+			setvis) msg "Set the active vision .rknn. For task=classify pick a classifier (e.g. MobileNet); for task=detect pick a YOLO detector. Switch the task in Vision settings; build one with Get/convert."
 			        n=$(model_pick rknn "$vis"); [ "$n" != "$vis" ] && { kiln_ini_set "$CONF" vision model "$n"; msg "[vision] model = ${n:-(unset)}"; } ;;
 			list)   models_list ;;
 			add)    models_add ;;
 			remove) models_remove ;;
-			guide)  msg "Kiln doesn't ship models -- you supply them, same as the vendor stack.\n\nLLM: put a *-rk3576-w4a16.rkllm in $MODELS_DIR (must match librkllmrt 1.2.0). kiln-chat auto-finds any .rkllm there.\n\nVision: convert a MobileNet .rknn with rknn-toolkit2 2.3.2 -- ON THE BOARD (aarch64) or an x86 host, see VISION.md -- and put it in $MODELS_DIR. Classification only." 18 84 ;;
+			guide)  msg "Kiln ships no models -- you supply them, same as the vendor stack.\n\nLLM: put a *-rk3576-w4a16.rkllm in $MODELS_DIR (must match librkllmrt 1.2.0). kiln-chat auto-finds any .rkllm there.\n\nVision: a .rknn must match librknnrt 2.3.x. Easiest is Models -> Get/convert, which builds one ON THIS BOARD (rknn-toolkit2 in a private venv) -- MobileNet (classify) or YOLOv8n (detect). Or drop your own .rknn here." 20 84 ;;
 			BACK|"") return ;;
 		esac
 	done
+}
+# Get/convert a model via kiln-convert. Runs on the real terminal (long output +
+# its own y/N prompts for the AGPL notice / overwrite), then pauses. --set-active
+# points config.ini at the result so it's usable immediately.
+models_get() {
+	KC="$(command -v kiln-convert 2>/dev/null || echo "$(dirname "$0")/kiln-convert")"
+	[ -x "$KC" ] || [ -f "$KC" ] || { msg "kiln-convert not found (expected on PATH or next to kiln-config)."; return; }
+	while :; do
+		sel=$(menu "Get / convert a model" "Build a .rknn ON THIS BOARD. The FIRST convert installs rknn-toolkit2 (a few hundred MB, a few minutes); after that it's quick." \
+			mobilenet "MobileNet classifier — pull ONNX (Apache-2.0) + convert" \
+			yolov8    "YOLOv8n detector   — pull ONNX (Ultralytics AGPL) + convert" \
+			local     "convert a local .onnx  (or place a local .rknn)" \
+			url       "download + convert from a URL (.onnx), or fetch a .rknn" \
+			BACK      "back") || return
+		case "$sel" in
+			mobilenet) run_convert mobilenet --set-active ;;
+			yolov8)    run_convert yolov8n --set-active ;;
+			local)     p=$(input "Full path to a local .onnx (converted) or .rknn (placed as-is):" "$MODELS_DIR/"); [ -n "$p" ] && run_convert "$p" --set-active ;;
+			url)       u=$(input "URL of a .onnx (converted here) or .rknn (downloaded as-is):" "https://"); [ -n "$u" ] && [ "$u" != "https://" ] && run_convert "$u" --set-active ;;
+			BACK|"")   return ;;
+		esac
+	done
+}
+run_convert() {
+	clear 2>/dev/null || true
+	echo "=== kiln-convert $* ==="; echo
+	KILN_CONFIG="$CONF" KILN_MODELS_DIR="$MODELS_DIR" "$KC" "$@"; rc=$?
+	echo; echo "=== kiln-convert exited $rc -- press Enter to return to kiln-config ==="; read -r _
 }
 models_list() {
 	t="Installed in $MODELS_DIR:\n\n"; found=0
@@ -354,7 +384,7 @@ models_remove() {
 INSTALLER="${KILN_DIR:-/opt/kiln}/scripts/kiln-install.sh"
 advanced_page() {
 	while :; do
-		sel=$(menu "Advanced" "system actions -- each asks to confirm; some need a reboot" \
+		sel=$(menu "System" "system actions -- each asks to confirm; some need a reboot" \
 			reload "reload the rknpu driver (rmmod + modprobe)" \
 			driver "rebuild the rknpu DKMS module + restore wifi" \
 			update "update Kiln (git pull + rebuild driver/runtimes; NO kernel change)" \
@@ -394,22 +424,22 @@ run_installer() {
 # ---------------------------------------------------------------------------
 [ -f "$CONF" ] || msg "No $CONF yet -- run the installer, or I'll create it on first save. Built-in defaults apply until then."
 while :; do
-	sel=$(menu "Main menu" "Configure Kiln. Pick a section:" \
-		1 "Status & Diagnostics  (kiln-doctor)" \
-		2 "LLM Settings          ([llm])" \
-		3 "Vision Settings       ([vision])" \
-		4 "Server                ([server] + kiln-serve)" \
-		5 "Models                (list / set / add / remove)" \
-		6 "Advanced              (driver / kernel / wifi)" \
-		Q "Quit") || break
+	sel=$(menu "Kiln" "Configure Kiln — pick a section  (Up/Down, Enter; Esc quits):" \
+		status "Status & diagnostics        (kiln-doctor)" \
+		llm    "LLM settings                ([llm])" \
+		vision "Vision settings             ([vision]: classify / detect)" \
+		server "API server                  ([server] + kiln-serve)" \
+		models "Models — get · convert · set   (you supply the models)" \
+		system "System — driver · kernel · wifi · update" \
+		quit   "Quit") || break
 	case "$sel" in
-		1) status_page ;;
-		2) llm_page ;;
-		3) vision_page ;;
-		4) server_page ;;
-		5) models_page ;;
-		6) advanced_page ;;
-		Q|"") break ;;
+		status) status_page ;;
+		llm)    llm_page ;;
+		vision) vision_page ;;
+		server) server_page ;;
+		models) models_page ;;
+		system) advanced_page ;;
+		quit|"") break ;;
 	esac
 done
 clear 2>/dev/null || true

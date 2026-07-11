@@ -29,8 +29,8 @@ into that kernel's DTB (`kernel-patches/0004`), so no DT overlay is involved.
 | `rknpu.ko` (vendor v0.9.8 + Kiln patch) | kernel modules | DKMS (rebuilds on kernel upgrade) |
 | `librkllmrt.so` / `librknnrt.so` (+ `libgomp`) | `/usr/lib` | fetched |
 | `kiln-chat`, `kiln-vision`, `kiln-serve` | `/usr/bin` | built / copied |
-| `kiln-doctor` (health check), `kiln-config` (config TUI) | `/usr/bin` | copied (always) |
-| model `*.rkllm` / `*.rknn` | `/opt/models` | you provide |
+| `kiln-doctor` (health check), `kiln-config` (config TUI), `kiln-convert` (on-board model conversion) | `/usr/bin` | copied (always) |
+| model `*.rkllm` / `*.rknn` | `/opt/models` | you provide (or `kiln-convert` builds one) |
 
 The NPU device node ships **in the Kiln kernel's DTB** (kernel-patches/0004), so
 there is no overlay to install on this path.
@@ -63,9 +63,10 @@ curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-in
 kiln-doctor                           # confirm health (paste this in issues)
 kiln-config                           # optional: TUI to set models / knobs / server
 
-# You supply the models (Kiln ships none). Once a MobileNet .rknn is in /opt/models:
-kiln-vision /opt/models/test.jpg      # needs a .rknn -- convert one, see VISION.md
-kiln-chat                             # needs a *.rkllm in /opt/models
+# You supply the models (Kiln ships none) -- but you can build one on the board:
+kiln-convert mobilenet --set-active   # pull + convert a classifier into /opt/models
+kiln-vision /opt/models/test.jpg      # ...then run it
+kiln-chat                             # needs a *.rkllm in /opt/models (scp yours in)
 ```
 
 **Manual — keep control of the reboots** with `KILN_MANUAL=1` (no auto-reboot, no

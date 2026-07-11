@@ -25,9 +25,11 @@ mainline**: those ten patches are required (see *Why it needs kernel patches*).
 - **You want** local **LLM + vision** inference on the NPU on a **mainline** kernel,
   not the vendor 6.1 BSP.
 - **You get** one command → `kiln-chat`, `kiln-vision`, `kiln-serve` (OpenAI-compatible
-  API), plus `kiln-config` (TUI) and `kiln-doctor` (health check).
-- **Not for you** if you're staying on the vendor **6.1 BSP** kernel, or if you need
-  **object detection / YOLO** — the vision path is **image classification only** today.
+  API), plus `kiln-config` (TUI), `kiln-convert` (on-board model conversion) and
+  `kiln-doctor` (health check).
+- **Not for you** if you're staying on the vendor **6.1 BSP** kernel. Vision is mainly
+  **image classification** (MobileNet); **object detection (YOLO)** works but is newer
+  and tested on fewer models — see [`VISION.md`](VISION.md).
 
 ## Status
 
@@ -97,8 +99,11 @@ Three tools, one config (`/etc/kiln/config.ini`, read by all of them):
   [`VISION.md`](VISION.md).
 
 - **`kiln-config`** — a `whiptail` TUI front-end to the config (Status & diagnostics,
-  LLM and vision settings), modelled on `armbian-config`. It edits `config.ini` in
-  place, so your hand edits and comments survive.
+  LLM and vision settings, models), modelled on `armbian-config`. It edits `config.ini`
+  in place, so your hand edits and comments survive.
+- **`kiln-convert`** — get/convert a model to a `.rknn` **on the board** (a private
+  `rknn-toolkit2` venv pinned to the runtime): `kiln-convert mobilenet` / `yolov8n`, or
+  a local ONNX / URL. No x86 host, no scp. See [`docs/TOOLS.md`](docs/TOOLS.md).
 - **`kiln-doctor`** — a plain-English ✓/✗ health check (driver loaded, MMU banks,
   models present + version-matched, …). Exits non-zero on any critical fault, so
   it's the "paste this before opening an issue" tool.
@@ -144,16 +149,20 @@ not the guessed open-driver layout.
 
 ## Models
 
-Kiln ships **no** models — you supply them, same as the vendor stack. `kiln-config`
-→ **Models** lists / sets / adds / removes them, and `kiln-doctor` checks a model is
-present and version-matched.
+Kiln ships **no** models — you supply them, same as the vendor stack. But you don't
+need an x86 box or scp: **`kiln-convert`** builds a `.rknn` on the board
+(`kiln-convert mobilenet` for a classifier, `kiln-convert yolov8n` for a detector, or
+your own ONNX / URL), pinning `rknn-toolkit2` to the runtime so it can't version-mismatch.
+`kiln-config` → **Models → Get/convert** is the same with a menu; it also lists / sets /
+adds / removes models, and `kiln-doctor` checks a model is present and version-matched.
 
 - **LLM** — put a `*-rk3576-w4a16.rkllm` in `/opt/models` (it must match `librkllmrt`
   **1.2.0**). Convert one with `rkllm-toolkit` 1.2.0, or use a pre-converted RK3576
   RKLLM model built for that runtime. `kiln-chat` auto-finds any `.rkllm` there.
-- **Vision** — convert a MobileNet `.rknn` with `rknn-toolkit2` **2.3.2** (on the
-  board itself or an x86 host) and drop it in `/opt/models`; see
-  [`VISION.md`](VISION.md). Classification only.
+- **Vision** — `kiln-convert mobilenet` builds a classifier `.rknn` on the board (or
+  `kiln-convert yolov8n` a YOLO detector, or your own ONNX); it pins `rknn-toolkit2` to
+  the `librknnrt` **2.3.x** runtime. You can also convert on an x86 host and drop the
+  `.rknn` in `/opt/models`. See [`VISION.md`](VISION.md).
 
 ## Layout
 
@@ -166,9 +175,10 @@ present and version-matched.
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`
-- `scripts/` — `kiln-install.sh` (one-shot installer) + `kiln-phase2.sh` (offline
-  phase-2 systemd handoff, runs after the first auto-reboot), `kiln-doctor` (health
-  check), `kiln-config` (whiptail config TUI), `build-dual-kernel-tree.sh` (maintainer
+- `scripts/` — `kiln-install.sh` (one-shot installer, with a whiptail front-end on a
+  terminal) + `kiln-phase2.sh` (offline phase-2 systemd handoff, runs after the first
+  auto-reboot), `kiln-doctor` (health check), `kiln-config` (whiptail config TUI),
+  `kiln-convert` (on-board model conversion), `build-dual-kernel-tree.sh` (maintainer
   dual-image tree); see [`scripts/README.md`](scripts/README.md)
 - `docs/` — tool references (`SERVER.md`, `CHAT.md`, `CONFIG.md`, `TOOLS.md`) + the
   full [documentation index](docs/README.md)
