@@ -1,5 +1,5 @@
 #!/bin/sh
-# kiln-doctor -- health check for a Kiln install (LLM + vision on the RK3576 NPU).
+# kiln-doctor -- health check for a Kiln install (LLM + vision on the Rockchip NPU).
 # Prints a plain-English ✓/✗ report and exits NON-ZERO if any CRITICAL check fails,
 # so it is scriptable and is the "paste this before opening an issue" tool. It is
 # also the engine behind kiln-config's Status page.
@@ -44,7 +44,18 @@ sover() { # print a version string found in a .so, or "?"
 	v=$(strings "$1" 2>/dev/null | grep -m1 "$2" || true); printf '%s' "${v:-?}"
 }
 
-printf '%s=== kiln-doctor -- RK3576 NPU health ===%s\n' "$C_D" "$C_0"
+# Detect the SoC so the report + its hints match the board. RK3576 (ROCK 4D) is
+# the tested target; RK3568 and RK3588 are the other supported / bring-up ones.
+SOC=rk3576
+DTC=""; [ -r /proc/device-tree/compatible ] && DTC="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null || true)"
+case "$DTC" in
+	*rk3588*) SOC=rk3588 ;;
+	*rk3568*) SOC=rk3568 ;;
+	*rk3576*) SOC=rk3576 ;;
+esac
+SOCU="$(printf '%s' "$SOC" | tr 'a-z' 'A-Z')"
+
+printf '%s=== kiln-doctor -- %s NPU health ===%s\n' "$C_D" "$SOCU" "$C_0"
 
 # --- kernel + install status ----------------------------------------------
 hdr "Kernel & install"
@@ -73,21 +84,29 @@ fi
 rn="$(ls /dev/dri/renderD* 2>/dev/null | head -1)"
 if [ -n "$rn" ]; then ok "render node present ($rn)"; else bad "no /dev/dri/renderD* render node -- the NPU won't be reachable"; fi
 
-# --- MMU banks (the RK3576 two-IOMMU fix) ---------------------------------
+# --- MMU banks (RK3576: the two-IOMMU 0x19 fix; other SoCs just report) -----
 hdr "NPU MMU state (dmesg)"
 DMESG="$($SUDO dmesg 2>/dev/null || true)"
 if [ -z "$DMESG" ]; then
 	info "can't read dmesg (try: sudo kiln-doctor) -- skipping MMU checks"
 else
-	if printf '%s\n' "$DMESG" | grep -qi 'failed to get pm runtime for npu0.*-110'; then
-		bad "'failed to get pm runtime for npu0, ret: -110' in dmesg -- NPU power domain wedged (missing regulator-always-on; see kernel-patches/0010)"
+	if printf '%s\n' "$DMESG" | grep -qi 'failed to get pm runtime for npu[0-9]*.*-110'; then
+		if [ "$SOC" = rk3576 ]; then
+			bad "'failed to get pm runtime for npu, ret: -110' in dmesg -- NPU power domain wedged (missing regulator-always-on; see kernel-patches/0010)"
+		else
+			bad "'failed to get pm runtime for npu, ret: -110' in dmesg -- NPU power domain wedged (the npu-supply rail is not staying on)"
+		fi
 	fi
 	mmu="$(printf '%s\n' "$DMESG" | grep -i 'mmu enable_all' | tail -1)"
 	if [ -n "$mmu" ]; then
-		if printf '%s' "$mmu" | grep -q 'st=0x19/0x19/0x19/0x19'; then
-			ok "all four MMU banks enabled (st=0x19/0x19/0x19/0x19)"
+		if [ "$SOC" = rk3576 ]; then
+			if printf '%s' "$mmu" | grep -q 'st=0x19/0x19/0x19/0x19'; then
+				ok "all four MMU banks enabled (st=0x19/0x19/0x19/0x19)"
+			else
+				warn "MMU enable_all present but state is not 0x19/0x19/0x19/0x19: $(printf '%s' "$mmu" | sed 's/.*mmu/mmu/')"
+			fi
 		else
-			warn "MMU enable_all present but state is not 0x19/0x19/0x19/0x19: $(printf '%s' "$mmu" | sed 's/.*mmu/mmu/')"
+			ok "NPU MMU enable_all present: $(printf '%s' "$mmu" | sed 's/.*mmu/mmu/')"
 		fi
 	else
 		info "no 'mmu enable_all' line yet (runs on first NPU use; try after kiln-vision/kiln-chat)"
@@ -125,7 +144,7 @@ elif [ -n "$LLM_AUTO" ]; then
 elif [ -n "$LLM" ]; then
 	bad "LLM model MISSING: $LLM and no *.rkllm in $MODELS_DIR -- put one there or fix it in kiln-config"
 else
-	info "no LLM model yet (vision-only) -- drop a *-rk3576-w4a16.rkllm in $MODELS_DIR and kiln-chat finds it"
+	info "no LLM model yet (vision-only) -- drop a *-${SOC}-w4a16.rkllm in $MODELS_DIR and kiln-chat finds it"
 fi
 # vision model is auto-discovered too (a .rknn can be a classifier OR a detector, so
 # with several present, pin the right one per task in kiln-config).
@@ -151,7 +170,7 @@ if [ -n "$VISR" ] && [ -f "$VISR" ]; then
 		*)     bad "vision model converted with rknn-toolkit2 $rv, but the runtime is librknnrt 2.3.0 -- reconvert on 2.3.x (kiln-convert pins the matching toolkit), or it throws std::out_of_range in rknn_inputs_set";;
 	esac
 fi
-info "the LLM .rkllm must match librkllmrt 1.2.0 (checked by the runtime at load; a mismatch fails init)"
+info "the LLM .rkllm must match the installed librkllmrt (checked by the runtime at load; a mismatch fails init)"
 
 # --- API server (kiln-serve) -----------------------------------------------
 hdr "API server (kiln-serve)"
@@ -177,7 +196,8 @@ if [ -d /sys/class/net ]; then
 	wl="$(ls -d /sys/class/net/wl* 2>/dev/null | head -1)"
 	if [ -n "$wl" ]; then ok "wireless interface present ($(basename "$wl"))"
 	elif lsmod 2>/dev/null | grep -q aic8800; then info "aic8800 module loaded but no wlan iface yet"
-	else info "no onboard wifi up (aic8800). If you need it, phase 2 rebuilds it; else use ethernet."; fi
+	elif [ "$SOC" = rk3576 ]; then info "no onboard wifi up (aic8800). If you need it, phase 2 rebuilds it; else use ethernet."
+	else info "no onboard wifi up. Use ethernet (the onboard radio varies by board)."; fi
 fi
 
 # --- verdict ---------------------------------------------------------------

@@ -58,12 +58,43 @@ set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
 GH="${KILN_GH:-gahingwoo/kiln}"
-# One installer serves both boards. Detect the SoC from the running (stock)
-# device-tree so we pull the right kernel release + install the right dtb/model.
-DT_COMPAT="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null || true)"
-case "$DT_COMPAT" in
-	*rk3568*) SOC=rk3568; BOARD=rock-3b; DTB=rk3568-rock-3b.dtb; DEF_KTAG=kiln-mainline-kernel-rk3568 ;;
-	*)        SOC=rk3576; BOARD=rock-4d; DTB=rk3576-rock-4d.dtb; DEF_KTAG=kiln-mainline-kernel ;;
+# One installer serves the supported boards. Detect the SoC from the running
+# (stock) device-tree so we pull the right kernel release + install the right
+# dtb/model. Override/force with KILN_SOC=rk3576|rk3568|rk3588 if detection is
+# wrong (or to opt in to the RK3588 bring-up).
+DT_COMPAT=""; [ -r /proc/device-tree/compatible ] && DT_COMPAT="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null || true)"
+case "${KILN_SOC:-$DT_COMPAT}" in
+	rk3568|*rk3568*) SOC=rk3568; BOARD=rock-3b; DTB=rk3568-rock-3b.dtb; DEF_KTAG=kiln-mainline-kernel-rk3568 ;;
+	rk3576|*rk3576*) SOC=rk3576; BOARD=rock-4d; DTB=rk3576-rock-4d.dtb; DEF_KTAG=kiln-mainline-kernel ;;
+	rk3588|*rk3588*)
+		# RK3588 (ROCK 5B) is an in-progress bring-up (see docs/RK3588.md): the
+		# vendor NPU device tree compiles but has NOT been validated on RK3588
+		# silicon. Never fall through to the RK3576 kernel here -- that would flash
+		# the wrong kernel onto RK3588. Require an explicit opt-in so a curious user
+		# can't misinstall by accident, and turn the stop into an invitation to help.
+		SOC=rk3588; BOARD=rock-5b; DTB=rk3588-rock-5b-kiln.dtb; DEF_KTAG=kiln-mainline-kernel-rk3588
+		if [ "${KILN_SOC:-}" != rk3588 ] && [ "${KILN_EXPERIMENTAL_RK3588:-0}" != 1 ]; then
+			printf '\n\033[1;33m[kiln] RK3588 (ROCK 5B) detected.\033[0m The RK3588 port is in bring-up\n' >&2
+			printf '  -- the NPU device tree compiles but is not yet validated on real RK3588\n' >&2
+			printf '  hardware, so the installer will not flash it automatically.\n\n' >&2
+			printf '  If you have an RK3588 board and want to help finish the port (we would love\n' >&2
+			printf '  that!), please comment on:\n' >&2
+			printf '    https://github.com/gahingwoo/kiln/issues/1\n' >&2
+			printf '  with your board model, `dmesg | grep -i rknn`, and -- if you can get it --\n' >&2
+			printf '  the vendor rknpu DT node from an RK3588 Rockchip BSP. See docs/RK3588.md.\n\n' >&2
+			printf '  To try the EXPERIMENTAL install anyway (expect the NPU may not probe yet),\n' >&2
+			printf '  re-run with:  KILN_SOC=rk3588 %s\n' "$0" >&2
+			exit 1
+		fi
+		printf '\n\033[1;33m[kiln] RK3588 EXPERIMENTAL install (bring-up).\033[0m The NPU may not probe\n' >&2
+		printf '  yet -- please paste `kiln-doctor` + `dmesg` into issue #1 either way, win or lose.\n' >&2
+		;;
+	*)
+		printf '\n\033[1;31m[kiln] ERROR:\033[0m unrecognized SoC in /proc/device-tree/compatible:\n' >&2
+		printf '  "%s"\n' "$DT_COMPAT" >&2
+		printf '  Kiln supports RK3576 (tested), RK3568 (untested) and RK3588 (bring-up).\n' >&2
+		printf '  If this really is one of those, force it with KILN_SOC=rk3576|rk3568|rk3588.\n' >&2
+		exit 1 ;;
 esac
 MODEL_RKNN="mobilenetv2-12_${SOC}.rknn"
 KTAG="${KILN_KERNEL_TAG:-$DEF_KTAG}"
@@ -464,6 +495,13 @@ elif ! on_patched_kernel; then
 	# user just fixes it and re-runs. Installing the kernel first and failing here
 	# would strand them on the wifi-less patched kernel with an incomplete cache.
 	predownload_cache
+	# RK3588 bring-up: there may be no published kernel yet. Check first and point
+	# to the issue instead of failing with a bare download error.
+	if [ "$SOC" = rk3588 ] && ! curl -fsSL $CURL_NET "https://api.github.com/repos/$GH/releases/tags/$KTAG" >/dev/null 2>&1; then
+		die "no '$KTAG' release is published yet -- the RK3588 kernel isn't built.
+       This is expected during bring-up. Please help finish the port at
+       https://github.com/gahingwoo/kiln/issues/1 (see docs/RK3588.md)."
+	fi
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
 	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 	# exclude the -dbg debug-symbol image (bindeb-pkg builds it; ~hundreds of MB,
