@@ -1,0 +1,133 @@
+name: mainline-npu-kernel-rk3588
+
+# Build a mainline linux-7.1.3 kernel for the Radxa ROCK 5B (RK3588) with Kiln's
+# RK3588 NPU patch (kernel-patches-rk3588/0001) -- the kiln DTB that deletes the
+# open accel/rocket rknn_core nodes and reshapes core 0 into a single vendor
+# rockchip,rk3588-rknpu node. Built natively on a free arm64 GH runner; published
+# as bindeb-pkg .debs. Companion to mainline-npu-kernel.yml (RK3576) and
+# mainline-npu-kernel-rk3568.yml.
+#
+# SKELETON / BRING-UP: the DTB compiles, but the vendor NPU node has NOT been
+# validated on real RK3588 silicon (see docs/RK3588.md). This build exists so a
+# tester with a ROCK 5B can flash it and report kiln-doctor + dmesg (issue #1).
+#
+# Trigger: Actions tab -> "mainline-npu-kernel-rk3588" -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kver:
+        description: "mainline kernel version (kernel.org v7.x)"
+        default: "7.1.3"
+      publish:
+        description: "attach the .deb to a GitHub release"
+        type: boolean
+        default: true
+  push:
+    paths:
+      - kernel-patches-rk3588/**
+      - .github/workflows/mainline-npu-kernel-rk3588.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mainline-npu-kernel-rk3588-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KVER: ${{ github.event.inputs.kver || '7.1.3' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Kiln
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install build deps (native arm64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev libdw-dev \
+            build-essential dpkg-dev debhelper rsync kmod cpio xz-utils
+
+      - name: Fetch mainline linux-${{ env.KVER }}
+        run: |
+          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${KVER}.tar.xz" | tar xJ
+          echo "KDIR=$PWD/linux-${KVER}" >> "$GITHUB_ENV"
+
+      - name: Apply Kiln RK3588 kernel patches
+        run: |
+          cd "$KDIR"
+          for f in "$GITHUB_WORKSPACE"/kernel-patches-rk3588/*.patch; do
+            echo "applying $(basename "$f")"; patch -p1 < "$f"
+          done
+          # Sanity: the kiln DTB must be in the Makefile and have the vendor node.
+          grep -q 'rk3588-rock-5b-kiln.dtb' arch/arm64/boot/dts/rockchip/Makefile
+          grep -q 'rockchip,rk3588-rknpu' arch/arm64/boot/dts/rockchip/rk3588-rock-5b-kiln.dts
+
+      - name: Configure (arm64 defconfig + NPU/IOMMU on, rocket off)
+        run: |
+          cd "$KDIR"
+          make ARCH=arm64 defconfig
+          # vendor rknpu (out-of-tree, built via DKMS on target) is used, not the
+          # open rocket driver -- the kiln DTB deletes the rknn_core nodes.
+          ./scripts/config --disable DRM_ACCEL_ROCKET
+          # the NPU MMU needs the Rockchip IOMMU built in; DRM render node for GEM.
+          ./scripts/config --enable ROCKCHIP_IOMMU \
+                           --enable DRM --enable DRM_ROCKCHIP \
+                           --enable ARM_ROCKCHIP_CPUFREQ || true
+          # ftrace + tracepoints for the capture/ diagnostics.
+          ./scripts/config --enable FTRACE --enable FUNCTION_TRACER || true
+          make ARCH=arm64 olddefconfig
+          echo "--- IOMMU/DRM/ROCKET after olddefconfig ---"
+          grep -E 'ROCKCHIP_IOMMU|DRM_ROCKCHIP|DRM_ACCEL_ROCKET' .config || true
+
+      - name: Build (bindeb-pkg)
+        run: |
+          cd "$KDIR"
+          # confirm the kiln DTB actually builds before the (long) full build.
+          make -j"$(nproc)" ARCH=arm64 rockchip/rk3588-rock-5b-kiln.dtb
+          # Unique version per build (date + run number) so a rebuilt kernel is
+          # never mistaken for an already-installed same-version deb.
+          make -j"$(nproc)" ARCH=arm64 \
+            KDEB_PKGVERSION="$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}" bindeb-pkg
+
+      - name: Collect .deb packages
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          mv linux-image-*.deb linux-headers-*.deb "$GITHUB_WORKSPACE/out/" 2>/dev/null || \
+            mv "$KDIR"/../linux-image-*.deb "$KDIR"/../linux-headers-*.deb "$GITHUB_WORKSPACE/out/"
+          rm -f "$GITHUB_WORKSPACE"/out/*-dbg_*.deb   # drop the huge debug-symbol image
+          echo "--- built ---"; ls -l "$GITHUB_WORKSPACE/out"
+          test -n "$(ls -A "$GITHUB_WORKSPACE"/out 2>/dev/null)" || { echo "no .deb produced"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiln-mainline-npu-kernel-rk3588-${{ env.KVER }}
+          path: out/*.deb
+          if-no-files-found: error
+
+      - name: Publish to a release
+        if: ${{ github.event.inputs.publish != 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=kiln-mainline-kernel-rk3588
+          NOTES="mainline linux-${KVER} for Radxa ROCK 5B (RK3588) + Kiln RK3588 NPU patch (kiln DTB: vendor rockchip,rk3588-rknpu, rocket rknn_core nodes removed). bindeb-pkg. SKELETON / BRING-UP -- the NPU node is NOT validated on RK3588 hardware yet; flash it to help finish the port (issue #1, docs/RK3588.md). Install: KILN_SOC=rk3588 kiln-install.sh."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release view "$TAG" --json assets --jq '.assets[].name' \
+              | xargs -r -I{} gh release delete-asset "$TAG" {} -y || true
+            gh release upload "$TAG" out/*.deb --clobber
+          else
+            gh release create "$TAG" out/*.deb --title "Kiln mainline NPU kernel — RK3588 / ROCK 5B (linux-${KVER})" --notes "$NOTES"
+          fi
