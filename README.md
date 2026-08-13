@@ -20,10 +20,14 @@ and adds a small, focused kernel patch set (clock / power-domain / two-IOMMU fix
 a module alone can't supply. It is mainline-*based*, not stock mainline — those patches
 are required (see *Why it needs kernel patches*).
 
-> **Companion project:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
+> **Companion projects.** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
 > is the other half of the same effort — the from-scratch *open* RK3576 NPU driver
 > (rocket / mesa). Two routes to the same goal: this repo puts the vendor stack on
 > a mainline kernel; that one builds an open driver from scratch.
+> [`charsiu`](https://github.com/gahingwoo/charsiu) is the open **LLM runtime** being
+> built on that driver — the eventual open replacement for the closed `librkllmrt`
+> this repo installs. It is early, and it uses Kiln as its yardstick: Kiln is the
+> oven, 叉烧 is what comes out of it.
 
 ## Is this for you?
 

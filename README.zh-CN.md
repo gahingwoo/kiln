@@ -18,9 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-in
 修复)——这些是内核代码,光靠模块补不上。它是"基于主线",不是"纯主线",这些补丁是必须的
 (见下方 *为什么需要内核补丁*)。
 
-> **姊妹项目:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu) 是同一
+> **姊妹项目。**[`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu) 是同一
 > 目标的另一半——从零写的**开源** RK3576 NPU 驱动(rocket / mesa)。两条路殊途同归:本仓库
 > 把厂商栈搬上主线内核;那个从零造开源驱动。
+> [`charsiu`](https://github.com/gahingwoo/charsiu) 则是建在那个驱动之上的开源 **LLM
+> 运行时**,也就是本仓库所安装的闭源 `librkllmrt` 的最终替代品。它还很早,并且拿 Kiln
+> 当标尺:Kiln 是叉烧炉,叉烧是炉子里出来的东西。
 
 ## 这适合你吗?
 
