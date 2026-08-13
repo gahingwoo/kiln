@@ -27,8 +27,8 @@ are required (see *Why it needs kernel patches*).
 > [`charsiu`](https://github.com/gahingwoo/charsiu) is the open **LLM runtime** being
 > built on that driver — the eventual open replacement for the closed `librkllmrt`
 > this repo installs. It is early, and it uses Kiln as its yardstick. The names go
-> together: char siu is Cantonese barbecue pork, a staple of Hong Kong and Malaysia,
-> and a kiln is the oven it is roasted in.
+> together: char siu is Cantonese barbecue pork, eaten across Guangdong, Hong Kong
+> and Malaysia, and a kiln is the oven it is roasted in.
 
 ## Is this for you?
 
