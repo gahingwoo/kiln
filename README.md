@@ -26,8 +26,9 @@ are required (see *Why it needs kernel patches*).
 > a mainline kernel; that one builds an open driver from scratch.
 > [`charsiu`](https://github.com/gahingwoo/charsiu) is the open **LLM runtime** being
 > built on that driver — the eventual open replacement for the closed `librkllmrt`
-> this repo installs. It is early, and it uses Kiln as its yardstick: Kiln is the
-> oven, 叉烧 is what comes out of it.
+> this repo installs. It is early, and it uses Kiln as its yardstick. The names go
+> together: char siu is Cantonese barbecue pork, a staple of Hong Kong and Malaysia,
+> and a kiln is the oven it is roasted in.
 
 ## Is this for you?
 
